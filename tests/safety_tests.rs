@@ -598,3 +598,269 @@ fn test_media_in_downloads_is_safe() {
         "MP4 in Downloads should be SAFE_CANDIDATE"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 21. Fake systemd fixture creates a dependency edge to ImportantApp
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_fake_systemd_creates_dependency_edge_to_important_app() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path();
+
+    // Create fake-systemd fixture referencing ImportantApp
+    let systemd_dir = base.join("fake-systemd/etc/systemd/system");
+    fs::create_dir_all(&systemd_dir).unwrap();
+    create_file(
+        &systemd_dir.join("my-app.service"),
+        "[Unit]\nDescription=My App\n\n[Service]\nExecStart=/usr/bin/my-app\nWorkingDirectory=/home/user/ImportantApp\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n",
+    );
+
+    // Scan the fake-systemd dir for evidence
+    let detector = safesort_ai::detectors::systemd::SystemdDetector::new();
+    let evidence = detector.scan_dir(&base.join("fake-systemd"));
+
+    let systemd_refs: Vec<_> = evidence
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                safesort_ai::scan::evidence::EvidenceKind::SystemdReference
+            )
+        })
+        .collect();
+
+    assert!(
+        !systemd_refs.is_empty(),
+        "fake-systemd fixture should produce SystemdReference evidence"
+    );
+
+    let refs_important_app = systemd_refs.iter().any(|e| e.path.contains("ImportantApp"));
+    assert!(
+        refs_important_app,
+        "Evidence should reference ImportantApp path"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 22. Dependency graph: systemd edge produces Critical impact
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_systemd_edge_produces_critical_impact() {
+    use safesort_ai::graph::{DependencyGraph, Edge, EdgeKind, ImpactLevel};
+
+    let mut graph = DependencyGraph::new();
+    graph.add_edge(Edge::with_description(
+        "my-app.service",
+        "/home/user/ImportantApp",
+        EdgeKind::UsesWorkingDirectory,
+        "WorkingDirectory in my-app.service",
+    ));
+
+    let analysis = graph.analyze_impact(std::path::Path::new("/home/user/ImportantApp"));
+    assert_eq!(
+        analysis.level,
+        ImpactLevel::Critical,
+        "UsesWorkingDirectory edge should produce Critical impact"
+    );
+    assert!(
+        analysis.has_dependencies(),
+        "Should have at least one dependency"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 23. Service-bound paths are not SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_service_bound_path_is_not_safe_candidate() {
+    use safesort_ai::graph::{DependencyGraph, Edge, EdgeKind, ImpactLevel};
+
+    let mut graph = DependencyGraph::new();
+    graph.add_edge(Edge::new(
+        "web.service",
+        "/var/www/myapp",
+        EdgeKind::UsesWorkingDirectory,
+    ));
+
+    let analysis = graph.analyze_impact(std::path::Path::new("/var/www/myapp"));
+    assert!(
+        analysis.level >= ImpactLevel::High,
+        "Service-bound path must be High or Critical, not safe candidate"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 24. Apply still refuses (service-bound context)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_still_refuses_always() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("any-plan.json")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Apply is disabled in this safety-first build")
+                .and(predicate::str::contains("Nothing was moved")),
+        );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 25. Safe Autopilot only plans — never moves
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_safe_autopilot_only_plans() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let downloads = base.join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    create_file(&downloads.join("Screenshot-2026-06-01.png"), "");
+    create_file(&downloads.join("report.pdf"), "");
+
+    let count_before = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .count();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let items: Vec<(PathBuf, safesort_ai::scan::risk::SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|item| {
+            let level = match item.safety_level.as_str() {
+                "LOCKED" => safesort_ai::scan::risk::SafetyLevel::Locked,
+                "REVIEW" => safesort_ai::scan::risk::SafetyLevel::Review,
+                _ => safesort_ai::scan::risk::SafetyLevel::SafeCandidate,
+            };
+            (PathBuf::from(&item.path), level)
+        })
+        .collect();
+
+    let engine = safesort_ai::placement::engine::SmartPlacementEngine::new(
+        home.clone(),
+        safesort_ai::placement::engine::OrganizationMode::SafeAutopilot,
+    );
+    let _placement = engine.run(&items);
+
+    let count_after = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .count();
+
+    assert_eq!(
+        count_before, count_after,
+        "Safe Autopilot must not move or create files"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 26. Guided Review only plans — never moves
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_guided_review_only_plans() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let downloads = base.join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    create_file(&downloads.join("export.csv"), "");
+
+    let count_before = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .count();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let items: Vec<(PathBuf, safesort_ai::scan::risk::SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|item| {
+            let level = match item.safety_level.as_str() {
+                "LOCKED" => safesort_ai::scan::risk::SafetyLevel::Locked,
+                "REVIEW" => safesort_ai::scan::risk::SafetyLevel::Review,
+                _ => safesort_ai::scan::risk::SafetyLevel::SafeCandidate,
+            };
+            (PathBuf::from(&item.path), level)
+        })
+        .collect();
+
+    let engine = safesort_ai::placement::engine::SmartPlacementEngine::new(
+        home.clone(),
+        safesort_ai::placement::engine::OrganizationMode::Guided,
+    );
+    let _placement = engine.run(&items);
+
+    let count_after = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .count();
+
+    assert_eq!(
+        count_before, count_after,
+        "Guided Review must not move or create files"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 27. No destructive filesystem operations (scan + plan combined)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_no_destructive_ops_combined() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    // Simulate a home directory with mixed content
+    let downloads = base.join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    create_file(&downloads.join("img.png"), "");
+
+    let project = base.join("Projects/myapp");
+    fs::create_dir_all(project.join(".git")).unwrap();
+    create_file(&project.join("Cargo.toml"), "[package]\nname=\"myapp\"\n");
+
+    let secret = base.join("ImportantApp");
+    fs::create_dir_all(&secret).unwrap();
+    create_file(&secret.join(".env"), "SECRET=x\n");
+
+    // Record before state
+    let before: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    // Run scan
+    let scanner = safesort_ai::scan::Scanner::new();
+    let _report = scanner.scan(&base, &base, 3).unwrap();
+
+    // Record after state
+    let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "No files should be created, moved, or deleted by scan"
+    );
+}

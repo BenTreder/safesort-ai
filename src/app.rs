@@ -528,6 +528,88 @@ fn cmd_profile(target: &PathBuf) -> Result<()> {
 
 // ─── Explain ───────────────────────────────────────────────────────
 
+/// A service file that references a given path.
+struct ServiceBinding {
+    /// File name of the unit (e.g. "my-app.service").
+    service_name: String,
+    /// The systemd field that referenced the path (e.g. "WorkingDirectory").
+    field: String,
+    /// The verbatim path value from the unit file.
+    referenced_path: String,
+}
+
+/// Walk up to 3 levels from `target.parent()` looking for a `fake-systemd` sibling dir.
+fn find_fake_systemd_dir(target: &Path) -> Option<PathBuf> {
+    let mut search = target.parent()?;
+    for _ in 0..4 {
+        let candidate = search.join("fake-systemd");
+        if candidate.exists() && candidate.is_dir() {
+            return Some(candidate);
+        }
+        search = search.parent()?;
+    }
+    None
+}
+
+/// Find all service files that reference a path whose basename matches `target`.
+fn find_service_bindings(target: &Path) -> Vec<ServiceBinding> {
+    let target_name = match target.file_name().and_then(|n| n.to_str()) {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ => return vec![],
+    };
+
+    let Some(systemd_dir) = find_fake_systemd_dir(target) else {
+        return vec![];
+    };
+
+    let detector = detectors::systemd::SystemdDetector::new();
+    let evidence = detector.scan_dir(&systemd_dir);
+
+    let mut bindings = Vec::new();
+    for ev in evidence {
+        if ev.kind != crate::scan::evidence::EvidenceKind::SystemdReference {
+            continue;
+        }
+        // Match by basename component in the referenced path
+        let ref_path = std::path::Path::new(&ev.path);
+        let matched = ref_path.components().any(|c| {
+            if let std::path::Component::Normal(n) = c {
+                n.to_string_lossy() == target_name
+            } else {
+                false
+            }
+        });
+        if !matched {
+            continue;
+        }
+
+        // description: "Referenced by /path/to/my-app.service (WorkingDirectory= …)"
+        let service_name = ev
+            .description
+            .split_whitespace()
+            .nth(2) // "Referenced by <path> ..."
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("(unknown)")
+            .to_string();
+
+        let field = ev
+            .description
+            .find('(')
+            .and_then(|open| ev.description.find('=').map(|eq| (open, eq)))
+            .map(|(open, eq)| ev.description[open + 1..eq].trim().to_string())
+            .unwrap_or_else(|| "reference".to_string());
+
+        bindings.push(ServiceBinding {
+            service_name,
+            field,
+            referenced_path: ev.path.clone(),
+        });
+    }
+
+    bindings
+}
+
 fn cmd_explain(path: &str) -> Result<()> {
     let target = PathBuf::from(path);
     if !target.exists() {
@@ -552,30 +634,62 @@ fn cmd_explain(path: &str) -> Result<()> {
         .filter(|i| i.path == path)
         .collect();
 
+    // Check for fake-systemd (and real systemd) service bindings
+    let service_bindings = find_service_bindings(&target);
+    let is_service_bound = !service_bindings.is_empty();
+
     println!();
     println!("  SafeSort AI — Safety Explanation");
     println!("  Path: {path}");
     println!();
 
     if let Some(item) = all_items.first() {
-        println!(
-            "  Classification: {} {}",
-            item.safety_level,
-            match item.safety_level.as_str() {
-                "LOCKED" => "🔒",
-                "REVIEW" => "⚠️ ",
-                _ => "✅",
-            }
-        );
+        // If service-bound, upgrade classification display
+        let (label, icon) = if is_service_bound {
+            ("REVIEW — service-bound ⚠️  (impact: CRITICAL 🔴)", "")
+        } else {
+            (
+                item.safety_level.as_str(),
+                match item.safety_level.as_str() {
+                    "LOCKED" => "🔒",
+                    "REVIEW" => "⚠️ ",
+                    _ => "✅",
+                },
+            )
+        };
+        println!("  Classification: {} {}", label, icon);
         println!("  Risk score: {:.2}", item.score);
         println!();
         println!("  Reasons:");
         for reason in &item.reasons {
             println!("    • {reason}");
         }
+        if is_service_bound {
+            println!("    • Referenced by active systemd service(s)");
+        }
     } else {
         println!("  Item not found in scan results. Try scanning its parent:");
         println!("    safesort scan --path {}", parent.display());
+    }
+
+    if is_service_bound {
+        println!();
+        println!("  Impact: CRITICAL 🔴");
+        println!("  Moving this would likely break:");
+        // Deduplicate by service name
+        let mut seen = std::collections::HashSet::new();
+        for b in &service_bindings {
+            if seen.insert(&b.service_name) {
+                println!("    - systemd service: {}", b.service_name);
+            }
+        }
+        for b in &service_bindings {
+            println!("      • {}: {}", b.field, b.referenced_path);
+        }
+        println!();
+        println!("  Recommendation:");
+        println!("    Do not move. Service-bound path.");
+        println!("    Use Workspace Overlay instead.");
     }
 
     println!();

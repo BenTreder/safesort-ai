@@ -83,6 +83,32 @@ impl SystemdDetector {
         evidence
     }
 
+    /// Scan an arbitrary directory tree for systemd unit files.
+    /// Used for fake-systemd fixtures in demo/test contexts.
+    pub fn scan_dir(&self, dir: &Path) -> Vec<Evidence> {
+        let mut evidence = Vec::new();
+        self.scan_dir_recursive(dir, &mut evidence);
+        evidence
+    }
+
+    fn scan_dir_recursive(&self, dir: &Path, evidence: &mut Vec<Evidence>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                self.scan_dir_recursive(&path, evidence);
+            } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if matches!(ext, "service" | "timer" | "target" | "socket" | "mount") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        evidence.extend(self.extract_paths(&content, &path.to_string_lossy()));
+                    }
+                }
+            }
+        }
+    }
+
     /// Extract path references from a systemd unit file's content.
     fn extract_paths(&self, content: &str, unit_path: &str) -> Vec<Evidence> {
         let mut evidence = Vec::new();
