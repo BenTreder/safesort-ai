@@ -30,6 +30,8 @@ pub struct SafetySummary {
     pub review: usize,
     pub safe_candidate: usize,
     pub total: usize,
+    /// Items skipped due to --exclude patterns.
+    pub skipped: usize,
     /// Impact level counts across all scanned items.
     pub impact_critical: usize,
     pub impact_high: usize,
@@ -106,6 +108,7 @@ impl ScanReport {
         scan_target: String,
         items: Vec<(ScanItem, Classification, SafetyPolicyDecision)>,
         profile: crate::profile::user_profile::UserProfile,
+        skipped: usize,
     ) -> Self {
         let mut locked = 0usize;
         let mut review = 0usize;
@@ -165,6 +168,7 @@ impl ScanReport {
                 review,
                 safe_candidate: safe,
                 total: locked + review + safe,
+                skipped,
                 impact_critical: ic,
                 impact_high: ih,
                 impact_medium: im,

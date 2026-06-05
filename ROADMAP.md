@@ -40,7 +40,7 @@
 
 ## Phase 2: Dependency Graph + Impact Visibility ⚠️ IN PROGRESS
 
-**Status**: v0.2.2 — impact wired into scan and plan output. Graph types complete.
+**Status**: v0.2.4 — impact wired into scan and plan output; `--depth` and `--exclude` added; parent-risk inheritance complete.
 `apply` remains disabled. Nothing is moved.
 
 > **Demo fixture path**: `./safesort_demo/` (gitignored)
@@ -62,7 +62,11 @@
 - [x] Scan terminal output: impact summary block + inline impact per example
 - [x] `PlacementRecommendation.impact_level` + impact icon in plan output
 - [x] Safe Autopilot explicit gate: MEDIUM/HIGH/CRITICAL impact → never auto-plan
-- [x] 147 tests passing (34 safety integration tests)
+- [x] `--depth <N>` flag — limits traversal depth on scan and plan
+- [x] `--exclude <PATTERN>` flag (repeatable) — skips items by name or path substring
+- [x] `SafetySummary.skipped` count — excluded items tracked in summary
+- [x] Excluded items never classified, never auto-plan eligible
+- [x] 160 tests passing (47 safety integration tests)
 - [x] `.gitignore` covers `target/` and `safesort_demo/`
 - [ ] Cross-reference script/Docker/nginx references against scanned paths
 - [ ] Detect Docker volume mounts and bind mounts
@@ -83,7 +87,6 @@
 - [ ] Detect Git remote URLs pointing to local paths
 - [ ] Impact analysis: "Moving X would break Y, Z"
 - [ ] Per-file ownership overrides in scan results
-- [ ] `--depth` and `--exclude` flags on scan command
 - [ ] `--rule-file` flag for custom alias/destination rules
 - [ ] Export/import rules as TOML
 

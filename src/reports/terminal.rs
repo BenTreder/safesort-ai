@@ -49,8 +49,18 @@ pub fn render(report: &ScanReport) -> String {
     w(&mut out, format_args!("    {:─>30}\n", ""));
     w(
         &mut out,
-        format_args!("    {:>18}  {:>6}\n\n", "TOTAL", report.summary.total),
+        format_args!("    {:>18}  {:>6}\n", "TOTAL", report.summary.total),
     );
+    if report.summary.skipped > 0 {
+        w(
+            &mut out,
+            format_args!(
+                "    ⊘  {:>12}  {:>6}  (--exclude)\n",
+                "SKIPPED", report.summary.skipped
+            ),
+        );
+    }
+    w(&mut out, format_args!("\n"));
 
     // Impact summary
     w(&mut out, format_args!("  Impact summary:\n\n"));

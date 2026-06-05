@@ -1,12 +1,12 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 2 stabilization — parent-risk inheritance)
-**Version**: 0.2.3
-**Phase**: 2 in progress — impact now wired into scan and plan output
+**Date**: 2026-06-05 (Phase 2 stabilization — depth/exclude controls)
+**Version**: 0.2.4
+**Phase**: 2 in progress — depth/exclude wired; impact + parent-risk inheritance complete
 
 ## Safety Audit Summary (2026-06-05)
 
-- **153 tests passing** (51 lib + 39 bin + 23 placement + 40 safety)
+- **160 tests passing** (51 lib + 39 bin + 23 placement + 47 safety)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
@@ -31,6 +31,14 @@ Impact level is now derived from evidence and surfaced throughout the tool:
 | Fake-systemd `scan_dir` for explain command | ✅ |
 | 7 new impact-focused tests | ✅ |
 | `.gitignore` ignores `target/` and `safesort_demo/` | ✅ |
+| **Depth and exclude controls (v0.2.4)** | |
+| `--depth <N>` on scan and plan | ✅ |
+| `--exclude <PATTERN>` (repeatable) on scan and plan | ✅ |
+| `SafetySummary.skipped` count | ✅ |
+| SKIPPED line in terminal scan output | ✅ |
+| SKIPPED line in plan placement summary | ✅ |
+| Excluded items never classified or auto-plan eligible | ✅ |
+| 7 new depth/exclude tests | ✅ |
 | **Parent-risk inheritance (v0.2.3)** | |
 | `EvidenceKind::InheritedRisk` | ✅ |
 | `LIVE_SITE_FOLDER_NAMES` in config | ✅ |

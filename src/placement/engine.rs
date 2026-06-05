@@ -81,6 +81,8 @@ pub struct PlacementSummary {
     pub review_needed: usize,
     pub leave_alone: usize,
     pub locked: usize,
+    /// Items skipped due to --exclude patterns (set by caller from ScanReport).
+    pub skipped: usize,
 }
 
 /// The Smart Placement Engine.

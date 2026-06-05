@@ -54,7 +54,7 @@ fn test_env_folder_is_locked() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 2).unwrap();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
 
     let locked = report.get_examples("LOCKED", 100);
     assert!(
@@ -83,7 +83,7 @@ fn test_git_repo_is_review() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 2).unwrap();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
 
     let review = report.get_examples("REVIEW", 100);
     assert!(
@@ -109,7 +109,7 @@ fn test_loose_screenshot_in_downloads_is_safe() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -140,7 +140,7 @@ fn test_loose_pdf_in_downloads_is_safe() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -167,7 +167,7 @@ fn test_symlink_is_classified() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 2).unwrap();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
 
     // The symlink itself should be LOCKED (safety policy: symlink targets are LOCKED)
     let locked = report.get_examples("LOCKED", 100);
@@ -254,7 +254,7 @@ fn test_scan_is_read_only() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let _report = scanner.scan(&base.join("home"), &home, 3).unwrap();
+    let _report = scanner.scan(&base.join("home"), &home, 3, &[]).unwrap();
 
     let count_after = count_files_recursively(&base);
 
@@ -306,7 +306,7 @@ fn test_wordpress_plugin_is_review() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 3).unwrap();
+    let report = scanner.scan(&base, &home, 3, &[]).unwrap();
 
     let review = report.get_examples("REVIEW", 100);
     assert!(
@@ -330,7 +330,7 @@ fn test_private_folder_is_locked() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 2).unwrap();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
 
     let locked = report.get_examples("LOCKED", 100);
     assert!(
@@ -357,7 +357,7 @@ fn test_script_with_absolute_path() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&scripts, &home, 1).unwrap();
+    let report = scanner.scan(&scripts, &home, 1, &[]).unwrap();
 
     let all_items: Vec<_> = report
         .items
@@ -394,7 +394,7 @@ fn test_ssh_folder_is_locked() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&home, &home, 2).unwrap();
+    let report = scanner.scan(&home, &home, 2, &[]).unwrap();
 
     let locked = report.get_examples("LOCKED", 100);
     assert!(
@@ -420,7 +420,7 @@ fn test_archive_in_downloads_is_safe() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -448,7 +448,7 @@ fn test_node_project_is_review() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+    let report = scanner.scan(&base.join("Projects"), &home, 2, &[]).unwrap();
 
     let review = report.get_examples("REVIEW", 100);
     assert!(
@@ -479,7 +479,7 @@ fn test_python_project_is_review() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+    let report = scanner.scan(&base.join("Projects"), &home, 2, &[]).unwrap();
 
     let review = report.get_examples("REVIEW", 100);
     assert!(
@@ -510,7 +510,7 @@ fn test_docker_project_is_review() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+    let report = scanner.scan(&base.join("Projects"), &home, 2, &[]).unwrap();
 
     let review = report.get_examples("REVIEW", 100);
     assert!(
@@ -535,7 +535,7 @@ fn test_website_folder_is_locked() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&base, &home, 2).unwrap();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
 
     let locked = report.get_examples("LOCKED", 100);
     assert!(
@@ -560,7 +560,7 @@ fn test_csv_in_downloads_is_safe() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -590,7 +590,7 @@ fn test_media_in_downloads_is_safe() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.join("home");
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -733,7 +733,7 @@ fn test_safe_autopilot_only_plans() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let items: Vec<(PathBuf, safesort_ai::scan::risk::SafetyLevel)> = report
         .items
@@ -786,7 +786,7 @@ fn test_guided_review_only_plans() {
 
     let scanner = safesort_ai::scan::Scanner::new();
     let home = base.clone();
-    let report = scanner.scan(&downloads, &home, 1).unwrap();
+    let report = scanner.scan(&downloads, &home, 1, &[]).unwrap();
 
     let items: Vec<(PathBuf, safesort_ai::scan::risk::SafetyLevel)> = report
         .items
@@ -850,7 +850,7 @@ fn test_no_destructive_ops_combined() {
 
     // Run scan
     let scanner = safesort_ai::scan::Scanner::new();
-    let _report = scanner.scan(&base, &base, 3).unwrap();
+    let _report = scanner.scan(&base, &base, 3, &[]).unwrap();
 
     // Record after state
     let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
@@ -890,7 +890,7 @@ fn test_scan_summary_includes_impact_counts() {
     create_file(&dl.join("report.pdf"), "");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 3).unwrap();
+    let report = scanner.scan(&base, &base, 3, &[]).unwrap();
 
     // The summary must have all five impact fields
     let s = &report.summary;
@@ -918,7 +918,7 @@ fn test_important_app_env_contributes_critical_impact() {
     create_file(&app.join(".env"), "SECRET=x\n");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 2).unwrap();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
 
     let all_items: Vec<_> = report.items.values().flatten().collect();
     let env_item = all_items
@@ -950,7 +950,7 @@ fn test_rust_project_contributes_medium_impact() {
     create_file(&proj.join("src/main.rs"), "fn main() {}");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 2).unwrap();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
 
     let all_items: Vec<_> = report.items.values().flatten().collect();
     let proj_item = all_items
@@ -1107,7 +1107,7 @@ fn test_impact_scan_no_destructive_ops() {
         .collect();
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let _report = scanner.scan(&base, &base, 3).unwrap();
+    let _report = scanner.scan(&base, &base, 3, &[]).unwrap();
 
     let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
         .into_iter()
@@ -1136,7 +1136,7 @@ fn test_public_html_child_is_not_safe_candidate() {
     create_file(&site.join("style.css"), "body { margin: 0; }\n");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 2).unwrap();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
 
     let safe = report.get_examples("SAFE", 100);
     assert!(
@@ -1171,7 +1171,7 @@ fn test_important_app_child_is_not_safe_candidate() {
     create_file(&app.join("config.yml"), "port: 8080\n");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 2).unwrap();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
 
     // ImportantApp itself must be LOCKED (contains .env)
     let locked = report.get_examples("LOCKED", 100);
@@ -1239,7 +1239,7 @@ fn test_child_of_critical_live_site_not_auto_plan_eligible() {
     create_file(&site.join("app.js"), "console.log('hello');\n");
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&base, &base, 2).unwrap();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
 
     // No child of a live-site dir should be SAFE_CANDIDATE
     let safe = report.get_examples("SAFE", 100);
@@ -1298,7 +1298,7 @@ fn test_inheritance_scan_is_read_only() {
         .collect();
 
     let scanner = safesort_ai::scan::Scanner::new();
-    let _report = scanner.scan(&base, &base, 3).unwrap();
+    let _report = scanner.scan(&base, &base, 3, &[]).unwrap();
 
     let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
         .into_iter()
@@ -1309,5 +1309,252 @@ fn test_inheritance_scan_is_read_only() {
     assert_eq!(
         before, after,
         "Inheritance-aware scan must not create, move, or delete any files"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 41. --depth limits traversal — items beyond depth are absent
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_scan_depth_limits_traversal() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    // depth-1 item: should appear with depth >= 1
+    let shallow = base.join("shallow.txt");
+    create_file(&shallow, "hello");
+
+    // depth-2 item: should appear with depth >= 2
+    let mid = base.join("level1");
+    create_file(&mid.join("mid.txt"), "mid");
+
+    // depth-3 item: should NOT appear with depth = 2
+    let deep = base.join("level1/level2");
+    create_file(&deep.join("deep.txt"), "deep");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+
+    // Scan with depth=2 — deep.txt should be absent from results
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
+    let all_paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.name.clone())
+        .collect();
+
+    assert!(
+        all_paths.contains(&"shallow.txt".to_string()),
+        "shallow.txt must appear at depth=2"
+    );
+    assert!(
+        all_paths.contains(&"mid.txt".to_string()),
+        "mid.txt must appear at depth=2"
+    );
+    assert!(
+        !all_paths.contains(&"deep.txt".to_string()),
+        "deep.txt must NOT appear at depth=2 (too deep)"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 42. plan --depth limits traversal depth in placement output
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_plan_depth_limits_traversal() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let shallow = base.join("photo.png");
+    create_file(&shallow, "");
+    let deep = base.join("a/b/c/photo_deep.png");
+    create_file(&deep, "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    // Depth=1 should see photo.png but not photo_deep.png
+    let report = scanner.scan(&base, &base, 1, &[]).unwrap();
+
+    let names: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.name.clone())
+        .collect();
+
+    assert!(
+        names.contains(&"photo.png".to_string()),
+        "photo.png must appear at depth=1"
+    );
+    assert!(
+        !names.contains(&"photo_deep.png".to_string()),
+        "photo_deep.png must NOT appear at depth=1"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 43. --exclude skips node_modules — items inside are absent
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_scan_exclude_skips_node_modules() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    create_file(&base.join("index.js"), "console.log('hi')");
+    let nm = base.join("node_modules");
+    create_file(&nm.join("lodash/index.js"), "// lodash");
+    create_file(&nm.join("react/index.js"), "// react");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let exclude = vec!["node_modules".to_string()];
+    let report = scanner.scan(&base, &base, 4, &exclude).unwrap();
+
+    let all_paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.path.clone())
+        .collect();
+
+    // index.js should be present
+    assert!(
+        all_paths
+            .iter()
+            .any(|p| p.contains("index.js") && !p.contains("node_modules")),
+        "index.js at root should be present"
+    );
+    // Nothing inside node_modules should appear
+    assert!(
+        !all_paths.iter().any(|p| p.contains("node_modules")),
+        "Items inside node_modules must be excluded"
+    );
+    // Skipped count must be > 0
+    assert!(
+        report.summary.skipped > 0,
+        "summary.skipped must reflect excluded items"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 44. --exclude skips wp-content — items inside are absent
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_plan_exclude_skips_wp_content() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    create_file(&base.join("wp-config.php"), "<?php");
+    let wpc = base.join("wp-content/plugins/my-plugin");
+    create_file(&wpc.join("my-plugin.php"), "<?php");
+    create_file(&wpc.join("composer.json"), "{}");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let exclude = vec!["wp-content".to_string()];
+    let report = scanner.scan(&base, &base, 4, &exclude).unwrap();
+
+    let paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.path.clone())
+        .collect();
+
+    assert!(
+        !paths.iter().any(|p| p.contains("wp-content")),
+        "Items inside wp-content must be excluded"
+    );
+    assert!(
+        report.summary.skipped > 0,
+        "summary.skipped must be > 0 when wp-content is excluded"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 45. skipped count appears in summary — multiple excludes stack
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_skipped_count_in_summary_multiple_excludes() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    create_file(&base.join("readme.md"), "# hello");
+    create_file(&base.join("node_modules/pkg/index.js"), "");
+    create_file(&base.join("target/debug/binary"), "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let exclude = vec!["node_modules".to_string(), "target".to_string()];
+    let report = scanner.scan(&base, &base, 4, &exclude).unwrap();
+
+    // readme.md should appear; excluded dirs should not
+    let names: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.name.clone())
+        .collect();
+    assert!(names.contains(&"readme.md".to_string()));
+    assert!(!names.iter().any(|n| n == "binary" || n == "index.js"));
+    assert!(
+        report.summary.skipped >= 2,
+        "skipped count must be >= 2 (node_modules/ and target/ items)"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 46. apply still refuses even when depth/exclude flags are set
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_still_refuses_with_depth_and_exclude() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("some-plan.json")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Apply is disabled in this safety-first build")
+                .and(predicate::str::contains("Nothing was moved")),
+        );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 47. excluded items are never auto-plan eligible
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_excluded_items_never_auto_plan_eligible() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    // These files WOULD be safe candidates without the exclude
+    let nm = base.join("node_modules");
+    create_file(&nm.join("some_logo.png"), "");
+    create_file(&nm.join("document.pdf"), "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let exclude = vec!["node_modules".to_string()];
+    let report = scanner.scan(&base, &base, 4, &exclude).unwrap();
+
+    // Excluded items must not appear in any classification group
+    let all_paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.path.clone())
+        .collect();
+    assert!(
+        !all_paths.iter().any(|p| p.contains("node_modules")),
+        "Excluded items must never appear in scan results or be auto-plan eligible"
+    );
+    assert_eq!(
+        report.summary.safe_candidate, 0,
+        "No SAFE_CANDIDATE results when only node_modules items exist"
     );
 }

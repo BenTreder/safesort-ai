@@ -42,7 +42,20 @@ Every scan now reports an **impact level** derived from evidence:
 
 Safe Autopilot only ever considers items with **NONE** or **LOW** impact for auto-planning. MEDIUM/HIGH/CRITICAL items are always routed to human review.
 
-### 5. Parent-Risk Inheritance
+### 5. Depth and Exclude Controls
+
+SafeSort AI supports two traversal controls for managing large or complex directories:
+
+- **`--depth <N>`** limits filesystem traversal to N levels deep (default: 2). Items beyond the depth limit are never scanned, classified, or recommended for placement.
+- **`--exclude <PATTERN>`** (repeatable) removes items from the pipeline entirely if their name or path substring matches the pattern. Excluded items are:
+  - Counted in the `SKIPPED` line of the safety summary
+  - Never classified as SAFE, REVIEW, or LOCKED
+  - Never auto-plan eligible (Safe Autopilot cannot touch them)
+  - Never shown in placement recommendations
+
+Example: `--exclude node_modules --exclude target` keeps build artifacts out of all scan results.
+
+### 6. Parent-Risk Inheritance
 
 A file cannot be `SAFE_CANDIDATE` if its parent directory is not safe. SafeSort AI applies a second classification pass after scanning:
 

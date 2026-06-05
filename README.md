@@ -197,7 +197,16 @@ safesort scan --path ~/Downloads --mode preview      # default
 safesort scan --path ~/Downloads --mode locked-down  # extra conservative
 safesort scan --path ~/Downloads --format json
 safesort scan --path ~/Downloads --format markdown --output report.md
+
+# Limit traversal depth (default: 2)
+safesort scan --path ~/Projects --depth 3
+
+# Exclude paths matching a name or substring (repeatable)
+safesort scan --path ~/Projects --exclude node_modules --exclude target
+safesort scan --path ~/Sites --exclude wp-content
 ```
+
+Excluded items appear in the `SKIPPED` count of the safety summary but are never classified, never recommended for placement, and never eligible for auto-planning.
 
 ### `safesort plan`
 Generate a smart placement plan with recommendations.
@@ -207,6 +216,10 @@ safesort plan --path ~/Downloads --mode preview          # recommendations only
 safesort plan --path ~/Downloads --mode guided           # interactive questions
 safesort plan --path ~/Downloads --mode safe-autopilot   # auto-plan ≥95% confidence
 safesort plan --path ~/Downloads --output plan.json      # export plan
+
+# With depth and exclude controls
+safesort plan --path ~/Projects --mode guided --depth 3
+safesort plan --path ~/Sites --mode safe-autopilot --exclude wp-content --exclude node_modules
 ```
 
 ### `safesort profile`

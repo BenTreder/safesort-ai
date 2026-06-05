@@ -34,13 +34,31 @@ impl Scanner {
     }
 
     /// Scan a path up to a given depth and return a scan report.
+    ///
+    /// Items whose name or path substring matches any entry in `exclude` are
+    /// skipped entirely — they are counted in `SafetySummary::skipped` and are
+    /// never classified, auto-planned, or presented in output.
     pub fn scan(
         &self,
         root: &std::path::PathBuf,
         home: &std::path::PathBuf,
         max_depth: usize,
+        exclude: &[String],
     ) -> Result<ScanReport> {
-        let items = walker::walk(root, max_depth)?;
+        let all_items = walker::walk(root, max_depth)?;
+
+        let mut skipped = 0usize;
+        let items: Vec<_> = all_items
+            .into_iter()
+            .filter(|item| {
+                if is_excluded(item, exclude) {
+                    skipped += 1;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
 
         // First pass: classify each item independently.
         let mut scanned_items: Vec<_> = items
@@ -105,9 +123,28 @@ impl Scanner {
             .collect();
 
         let profile = UserProfile::infer(&scanned_items);
-        let report = ScanReport::build(root.to_string_lossy().to_string(), scanned_items, profile);
+        let report = ScanReport::build(
+            root.to_string_lossy().to_string(),
+            scanned_items,
+            profile,
+            skipped,
+        );
         Ok(report)
     }
+}
+
+/// Return true if `item` matches any of the exclude patterns.
+/// Matches by exact name or path substring (case-insensitive).
+fn is_excluded(item: &crate::scan::item::ScanItem, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+    let path_str = item.path.to_string_lossy().to_lowercase();
+    let name_lower = item.name.to_lowercase();
+    patterns.iter().any(|p| {
+        let p = p.to_lowercase();
+        name_lower == p || path_str.contains(p.as_str())
+    })
 }
 
 /// Return true if any component of `path` matches a live-site folder name.

@@ -19,18 +19,22 @@ pub fn run(cli: Cli) -> Result<()> {
             mode,
             format,
             output,
+            depth,
+            exclude,
         } => {
             let target = resolve_target(path, home)?;
-            cmd_scan(&target, mode, format, output)
+            cmd_scan(&target, mode, format, output, depth, &exclude)
         }
         Commands::Plan {
             path,
             home,
             mode,
             output,
+            depth,
+            exclude,
         } => {
             let target = resolve_target(path, home)?;
-            cmd_plan(&target, mode, output)
+            cmd_plan(&target, mode, output, depth, &exclude)
         }
         Commands::Profile { path, home } => {
             let target = resolve_target(path, home)?;
@@ -267,12 +271,14 @@ fn cmd_scan(
     mode: OrgMode,
     format: OutputFormat,
     output: Option<String>,
+    depth: usize,
+    exclude: &[String],
 ) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = org_mode(mode);
 
     let scanner = Scanner::new();
-    let report = scanner.scan(target, &home, SCAN_DEPTH)?;
+    let report = scanner.scan(target, &home, depth, exclude)?;
 
     // Also run systemic detectors
     let _systemd_evidence = detectors::systemd::SystemdDetector::new().scan_all();
@@ -297,7 +303,7 @@ fn cmd_scan(
 
     // If mode is not preview, show placement summary
     if !matches!(mode, OrgMode::Preview) {
-        show_placement_summary(target, &home, org)?;
+        show_placement_summary(target, &home, org, depth, exclude)?;
     }
 
     Ok(())
@@ -305,7 +311,13 @@ fn cmd_scan(
 
 // ─── Plan (Smart Placement) ────────────────────────────────────────
 
-fn cmd_plan(target: &PathBuf, mode: OrgMode, output: Option<String>) -> Result<()> {
+fn cmd_plan(
+    target: &PathBuf,
+    mode: OrgMode,
+    output: Option<String>,
+    depth: usize,
+    exclude: &[String],
+) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = org_mode(mode);
 
@@ -317,7 +329,7 @@ fn cmd_plan(target: &PathBuf, mode: OrgMode, output: Option<String>) -> Result<(
 
     // Run scan first
     let scanner = Scanner::new();
-    let report = scanner.scan(target, &home, SCAN_DEPTH)?;
+    let report = scanner.scan(target, &home, depth, exclude)?;
 
     // Extract items for placement engine
     let items: Vec<(PathBuf, crate::scan::risk::SafetyLevel)> = report
@@ -336,7 +348,8 @@ fn cmd_plan(target: &PathBuf, mode: OrgMode, output: Option<String>) -> Result<(
 
     // Run placement engine
     let engine = SmartPlacementEngine::new(home.clone(), org);
-    let placement = engine.run(&items);
+    let mut placement = engine.run(&items);
+    placement.summary.skipped = report.summary.skipped;
 
     // Render results
     render_placement_plan(&placement, &home)?;
@@ -372,6 +385,9 @@ fn render_placement_plan(
     println!("  Placement Summary:");
     println!("  ─────────────────────────────────");
     println!("    Total files scanned:    {}", summary.total_files);
+    if summary.skipped > 0 {
+        println!("    ⊘ Excluded (--exclude): {}", summary.skipped);
+    }
     println!("    🔒 Locked (Critical):   {}", summary.locked);
 
     if matches!(placement.mode, OrganizationMode::SafeAutopilot) {
@@ -461,9 +477,15 @@ fn render_recommendation(rec: &crate::placement::engine::PlacementRecommendation
     println!();
 }
 
-fn show_placement_summary(target: &PathBuf, home: &PathBuf, org: OrganizationMode) -> Result<()> {
+fn show_placement_summary(
+    target: &PathBuf,
+    home: &PathBuf,
+    org: OrganizationMode,
+    depth: usize,
+    exclude: &[String],
+) -> Result<()> {
     let scanner = Scanner::new();
-    let report = scanner.scan(target, home, SCAN_DEPTH)?;
+    let report = scanner.scan(target, home, depth, exclude)?;
 
     let items: Vec<(PathBuf, crate::scan::risk::SafetyLevel)> = report
         .items
@@ -499,7 +521,7 @@ fn cmd_profile(target: &PathBuf) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
     let scanner = Scanner::new();
-    let report = scanner.scan(target, &home, SCAN_DEPTH)?;
+    let report = scanner.scan(target, &home, SCAN_DEPTH, &[])?;
 
     println!();
     println!("  SafeSort AI — User Profile Analysis");
@@ -634,7 +656,7 @@ fn cmd_explain(path: &str) -> Result<()> {
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
-    let report = scanner.scan(&parent, &home, 2)?;
+    let report = scanner.scan(&parent, &home, 2, &[])?;
 
     let all_items: Vec<_> = report
         .items
