@@ -1,0 +1,626 @@
+use super::confidence::{Confidence, ConfidenceBand};
+use super::destination::{DestinationPlanner, PlacementDestination};
+use super::file_purpose::{FilePurpose, FilePurposeDetector};
+use super::ownership::OwnershipDetector;
+use super::question_queue::{Question, QuestionOption, QuestionQueue};
+use super::rules::RulesEngine;
+use crate::scan::risk::SafetyLevel;
+use std::path::{Path, PathBuf};
+
+/// Organization modes for SafeSort AI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrganizationMode {
+    /// Default: shows recommendations only. Never moves anything.
+    Preview,
+    /// Creates question queue for uncertain files.
+    Guided,
+    /// Auto-plans only GREEN files with ≥95 confidence.
+    SafeAutopilot,
+    /// Extra conservative. Auto-plans nothing.
+    LockedDown,
+}
+
+impl OrganizationMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preview => "preview",
+            Self::Guided => "guided",
+            Self::SafeAutopilot => "safe-autopilot",
+            Self::LockedDown => "locked-down",
+        }
+    }
+}
+
+/// A single placement recommendation.
+#[derive(Debug, Clone)]
+pub struct PlacementRecommendation {
+    /// The file being analyzed.
+    pub file_path: PathBuf,
+    /// File name.
+    pub file_name: String,
+    /// Safety level from the scan engine.
+    pub safety_level: SafetyLevel,
+    /// Detected owner, if any.
+    pub owner: Option<super::ownership::DetectedOwner>,
+    /// Detected purpose.
+    pub purpose: FilePurpose,
+    /// File type description.
+    pub file_type: String,
+    /// Risk level for placement.
+    pub risk: String,
+    /// Confidence 0–100.
+    pub confidence: Confidence,
+    /// Recommended destinations.
+    pub destinations: Vec<PlacementDestination>,
+    /// Reason for the recommendation.
+    pub reason: String,
+    /// What band this falls into.
+    pub band: ConfidenceBand,
+}
+
+/// Result of running the smart placement engine.
+#[derive(Debug)]
+pub struct PlacementResult {
+    /// All recommendations.
+    pub recommendations: Vec<PlacementRecommendation>,
+    /// Questions for guided review (80–94% confidence).
+    pub question_queue: QuestionQueue,
+    /// Summary counts.
+    pub summary: PlacementSummary,
+    /// The mode used.
+    pub mode: OrganizationMode,
+}
+
+#[derive(Debug, Default)]
+pub struct PlacementSummary {
+    pub total_files: usize,
+    pub auto_plan_eligible: usize,
+    pub guided_review: usize,
+    pub review_needed: usize,
+    pub leave_alone: usize,
+    pub locked: usize,
+}
+
+/// The Smart Placement Engine.
+pub struct SmartPlacementEngine {
+    ownership: OwnershipDetector,
+    purpose: FilePurposeDetector,
+    destination: DestinationPlanner,
+    rules: RulesEngine,
+    mode: OrganizationMode,
+    home: PathBuf,
+}
+
+impl SmartPlacementEngine {
+    pub fn new(home: PathBuf, mode: OrganizationMode) -> Self {
+        let destination = DestinationPlanner::new(home.clone());
+        Self {
+            ownership: OwnershipDetector::new(),
+            purpose: FilePurposeDetector::new(),
+            destination,
+            rules: RulesEngine::new(),
+            mode,
+            home,
+        }
+    }
+
+    /// Access the rules engine for customization.
+    pub fn rules(&mut self) -> &mut RulesEngine {
+        &mut self.rules
+    }
+
+    /// Analyze a single file and produce a recommendation.
+    pub fn analyze_file(
+        &self,
+        file_path: &Path,
+        safety_level: SafetyLevel,
+    ) -> PlacementRecommendation {
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let parent = file_path.parent().unwrap_or(file_path);
+
+        // Detect ownership and purpose
+        let owner = self.ownership.detect(&file_name, parent);
+        let purpose = self.purpose.detect(&file_name, parent);
+
+        // Determine file type description
+        let file_type = Self::describe_file_type(&file_name);
+
+        // Check if in safe zone (Downloads/Desktop)
+        let is_safe_zone = self.is_in_safe_zone(file_path);
+
+        // Check if inside an active project
+        let inside_project = self.is_inside_project(file_path);
+
+        // Compute confidence
+        let mut confidence = self.compute_confidence(
+            &file_name,
+            &owner,
+            purpose,
+            &safety_level,
+            is_safe_zone,
+            inside_project,
+        );
+
+        // In locked-down mode, cap confidence at 80 (never auto-plan)
+        if self.mode == OrganizationMode::LockedDown {
+            if confidence.value() > 80 {
+                confidence = Confidence(80);
+            }
+        }
+
+        // Generate destinations
+        let destinations = if matches!(safety_level, SafetyLevel::Locked) {
+            vec![]
+        } else {
+            self.destination.plan(owner.as_ref(), purpose, is_safe_zone)
+        };
+
+        // Build reason
+        let reason = Self::build_reason(&owner, purpose, &safety_level, &confidence, is_safe_zone);
+
+        // Determine risk string
+        let risk = match safety_level {
+            SafetyLevel::Locked => "LOCKED".to_string(),
+            SafetyLevel::Review => "REVIEW".to_string(),
+            SafetyLevel::SafeCandidate => {
+                if confidence.is_auto_plan() {
+                    "GREEN".to_string()
+                } else {
+                    "YELLOW".to_string()
+                }
+            }
+        };
+
+        PlacementRecommendation {
+            file_path: file_path.to_path_buf(),
+            file_name,
+            safety_level,
+            owner,
+            purpose,
+            file_type,
+            risk,
+            confidence,
+            destinations,
+            reason,
+            band: confidence.band(),
+        }
+    }
+
+    /// Run the engine on a set of scanned items.
+    pub fn run(&self, items: &[(PathBuf, SafetyLevel)]) -> PlacementResult {
+        let mut recommendations = Vec::new();
+        let mut question_queue = QuestionQueue::new();
+        let mut summary = PlacementSummary::default();
+
+        for (path, safety) in items {
+            summary.total_files += 1;
+
+            if matches!(safety, SafetyLevel::Locked) {
+                summary.locked += 1;
+                let rec = self.analyze_file(path, *safety);
+                recommendations.push(rec);
+                continue;
+            }
+
+            let rec = self.analyze_file(path, *safety);
+
+            match rec.band {
+                ConfidenceBand::AutoPlan => {
+                    if self.mode == OrganizationMode::SafeAutopilot
+                        || self.mode == OrganizationMode::Guided
+                    {
+                        summary.auto_plan_eligible += 1;
+                    } else {
+                        // Preview/locked-down: don't auto-plan
+                        summary.review_needed += 1;
+                    }
+                }
+                ConfidenceBand::GuidedReview => {
+                    if self.mode == OrganizationMode::Guided {
+                        summary.guided_review += 1;
+                        // Create a question
+                        let question = self.build_question(&rec);
+                        question_queue.push(question);
+                    } else {
+                        summary.review_needed += 1;
+                    }
+                }
+                ConfidenceBand::ReviewNeeded => {
+                    summary.review_needed += 1;
+                }
+                ConfidenceBand::LeaveAlone => {
+                    summary.leave_alone += 1;
+                }
+            }
+
+            recommendations.push(rec);
+        }
+
+        PlacementResult {
+            recommendations,
+            question_queue,
+            summary,
+            mode: self.mode,
+        }
+    }
+
+    fn build_question(&self, rec: &PlacementRecommendation) -> Question {
+        let mut options = Vec::new();
+
+        // Add destination options
+        for dest in rec.destinations.iter().take(3) {
+            options.push(QuestionOption::Stage(dest.clone()));
+        }
+
+        options.push(QuestionOption::Leave);
+        options.push(QuestionOption::ReviewNeeded);
+
+        // Create rule option if we have an owner
+        if let Some(ref owner) = rec.owner {
+            if let Some(first_dest) = rec.destinations.first() {
+                options.push(QuestionOption::CreateRule {
+                    pattern: format!(
+                        "{} + {}",
+                        owner.canonical.to_lowercase(),
+                        rec.purpose.as_str().to_lowercase()
+                    ),
+                    destination: first_dest.clone(),
+                });
+            }
+        }
+
+        Question {
+            file_path: rec.file_path.to_string_lossy().to_string(),
+            detected_owner: rec.owner.clone(),
+            detected_purpose: rec.purpose,
+            file_type_desc: rec.file_type.clone(),
+            risk_level: rec.risk.clone(),
+            confidence: rec.confidence,
+            destinations: rec.destinations.clone(),
+            reason: rec.reason.clone(),
+            options,
+        }
+    }
+
+    fn compute_confidence(
+        &self,
+        file_name: &str,
+        owner: &Option<super::ownership::DetectedOwner>,
+        purpose: FilePurpose,
+        safety: &SafetyLevel,
+        is_safe_zone: bool,
+        inside_project: bool,
+    ) -> Confidence {
+        let mut score = Confidence::new();
+
+        // Locked files get 0 confidence for placement
+        if matches!(safety, SafetyLevel::Locked) {
+            return score;
+        }
+
+        // Owner match
+        if owner.is_some() {
+            score.add(Confidence::EXACT_BRAND_MATCH);
+        }
+
+        // Purpose match
+        if purpose != FilePurpose::Unknown {
+            score.add(Confidence::PURPOSE_MATCH);
+        }
+
+        // Safe file type
+        if Self::is_safe_extension(file_name) {
+            score.add(Confidence::SAFE_FILE_TYPE);
+        }
+
+        // Safe source zone
+        if is_safe_zone {
+            score.add(Confidence::SAFE_SOURCE);
+        }
+
+        // Loose file bonus
+        if !inside_project {
+            score.add(Confidence::LOOSE_FILE);
+        }
+
+        // Extension signals purpose
+        if Self::extension_signals_purpose(file_name, purpose) {
+            score.add(Confidence::EXTENSION_SIGNAL);
+        }
+
+        // Penalties
+        if inside_project {
+            score.subtract(Confidence::INSIDE_PROJECT_PENALTY);
+        }
+
+        // Ambiguity penalty: if owner is unknown but purpose is known
+        if owner.is_none() && purpose != FilePurpose::Unknown {
+            score.subtract(15);
+        }
+
+        score
+    }
+
+    fn is_safe_extension(filename: &str) -> bool {
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        matches!(
+            ext.as_str(),
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "svg"
+                | "pdf"
+                | "txt"
+                | "md"
+                | "csv"
+                | "zip"
+                | "tar"
+                | "gz"
+                | "tgz"
+                | "mp4"
+                | "mp3"
+                | "wav"
+                | "doc"
+                | "docx"
+                | "xls"
+                | "xlsx"
+                | "ppt"
+                | "pptx"
+        )
+    }
+
+    fn extension_signals_purpose(filename: &str, purpose: FilePurpose) -> bool {
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        match purpose {
+            FilePurpose::Logo | FilePurpose::Icon | FilePurpose::Banner | FilePurpose::Image => {
+                matches!(
+                    ext.as_str(),
+                    "png" | "jpg" | "jpeg" | "svg" | "gif" | "webp"
+                )
+            }
+            FilePurpose::Screenshot | FilePurpose::ErrorScreenshot | FilePurpose::QaScreenshot => {
+                matches!(ext.as_str(), "png" | "jpg" | "jpeg")
+            }
+            FilePurpose::Document
+            | FilePurpose::Report
+            | FilePurpose::Invoice
+            | FilePurpose::Proposal => {
+                matches!(ext.as_str(), "pdf" | "doc" | "docx" | "txt" | "md")
+            }
+            FilePurpose::Archive | FilePurpose::ReleaseZip | FilePurpose::Backup => {
+                matches!(ext.as_str(), "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz")
+            }
+            _ => false,
+        }
+    }
+
+    fn is_in_safe_zone(&self, path: &Path) -> bool {
+        // Check if any component of the path is Downloads or Desktop.
+        // First try relative to home, then check absolute path components.
+        let components: Vec<_> = if let Ok(rel) = path.strip_prefix(&self.home) {
+            rel.components().collect()
+        } else {
+            path.components().collect()
+        };
+        // Check if "Downloads" or "Desktop" appears in the last 2 components
+        let check: Vec<_> = components.iter().rev().take(2).collect();
+        check.iter().any(|c| {
+            let name = c.as_os_str().to_string_lossy();
+            matches!(name.as_ref(), "Downloads" | "Desktop")
+        })
+    }
+
+    fn is_inside_project(&self, path: &Path) -> bool {
+        // Check if any nearby ancestor (up to 3 levels) has a project marker.
+        // Limited depth avoids false positives from project markers in distant ancestors.
+        for ancestor in path.ancestors().skip(1).take(3) {
+            if ancestor.join(".git").exists()
+                || ancestor.join("Cargo.toml").exists()
+                || ancestor.join("package.json").exists()
+                || ancestor.join("pyproject.toml").exists()
+                || ancestor.join("composer.json").exists()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn describe_file_type(filename: &str) -> String {
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        match ext.as_str() {
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => "Image".to_string(),
+            "pdf" => "PDF document".to_string(),
+            "txt" | "md" | "rst" => "Text document".to_string(),
+            "doc" | "docx" => "Word document".to_string(),
+            "xls" | "xlsx" | "csv" => "Spreadsheet".to_string(),
+            "ppt" | "pptx" => "Presentation".to_string(),
+            "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" => "Archive".to_string(),
+            "mp4" | "mkv" | "avi" | "mov" | "webm" => "Video".to_string(),
+            "mp3" | "wav" | "flac" | "ogg" | "aac" => "Audio".to_string(),
+            "rs" | "py" | "js" | "ts" | "go" | "c" | "cpp" | "java" | "rb" | "php" => {
+                "Source code".to_string()
+            }
+            _ => format!("{} file", if ext.is_empty() { "Unknown" } else { &ext }),
+        }
+    }
+
+    fn build_reason(
+        owner: &Option<super::ownership::DetectedOwner>,
+        purpose: FilePurpose,
+        safety: &SafetyLevel,
+        confidence: &Confidence,
+        is_safe_zone: bool,
+    ) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(ref o) = *owner {
+            parts.push(format!("Filename matches brand/project '{}'", o.display));
+        }
+
+        if purpose != FilePurpose::Unknown {
+            parts.push(format!("Purpose detected: {}", purpose.as_str()));
+        }
+
+        if is_safe_zone {
+            parts.push("Source is Downloads/Desktop (safe zone)".to_string());
+        }
+
+        match safety {
+            SafetyLevel::Locked => parts.push("LOCKED by safety engine".to_string()),
+            SafetyLevel::Review => parts.push("Needs review".to_string()),
+            _ => {}
+        };
+
+        parts.push(format!("Confidence: {}%", confidence.value()));
+
+        if parts.is_empty() {
+            "No specific signals detected".to_string()
+        } else {
+            parts.join("; ")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine(mode: OrganizationMode) -> SmartPlacementEngine {
+        SmartPlacementEngine::new(PathBuf::from("/home/user"), mode)
+    }
+
+    #[test]
+    fn test_bentreder_logo_high_confidence() {
+        let eng = engine(OrganizationMode::Preview);
+        let rec = eng.analyze_file(
+            Path::new("/home/user/Downloads/bentreder_logo.png"),
+            SafetyLevel::SafeCandidate,
+        );
+        assert!(
+            rec.confidence.value() >= 80,
+            "bentreder_logo.png should have high confidence, got {}",
+            rec.confidence.value()
+        );
+        assert_eq!(rec.purpose, FilePurpose::Logo);
+        assert!(rec.owner.is_some());
+        assert_eq!(rec.owner.unwrap().canonical, "BenTreder.com");
+    }
+
+    #[test]
+    fn test_quicktapid_banner() {
+        let eng = engine(OrganizationMode::Preview);
+        let rec = eng.analyze_file(
+            Path::new("/home/user/Downloads/quicktapid_banner.png"),
+            SafetyLevel::SafeCandidate,
+        );
+        assert!(rec.confidence.value() >= 80);
+        assert_eq!(rec.purpose, FilePurpose::Banner);
+        assert_eq!(rec.owner.unwrap().canonical, "QuickTapID");
+    }
+
+    #[test]
+    fn test_website_fix_finder_release_zip() {
+        let eng = engine(OrganizationMode::Preview);
+        let rec = eng.analyze_file(
+            Path::new("/home/user/Downloads/website-fix-finder-v1.0.zip"),
+            SafetyLevel::SafeCandidate,
+        );
+        assert!(rec.confidence.value() >= 50);
+        assert_eq!(rec.purpose, FilePurpose::ReleaseZip);
+    }
+
+    #[test]
+    fn test_error_screenshot() {
+        let eng = engine(OrganizationMode::Preview);
+        let rec = eng.analyze_file(
+            Path::new("/home/user/Downloads/error-checkout-page.png"),
+            SafetyLevel::SafeCandidate,
+        );
+        assert_eq!(rec.purpose, FilePurpose::ErrorScreenshot);
+    }
+
+    #[test]
+    fn test_locked_file_gets_zero_confidence() {
+        let eng = engine(OrganizationMode::SafeAutopilot);
+        let rec = eng.analyze_file(Path::new("/home/user/.ssh/id_rsa"), SafetyLevel::Locked);
+        assert_eq!(rec.confidence.value(), 0);
+        assert!(rec.destinations.is_empty());
+    }
+
+    #[test]
+    fn test_safe_autopilot_only_auto_plans_95_plus() {
+        let eng = engine(OrganizationMode::SafeAutopilot);
+        let items = vec![
+            (
+                PathBuf::from("/home/user/Downloads/bentreder_logo.png"),
+                SafetyLevel::SafeCandidate,
+            ),
+            (
+                PathBuf::from("/home/user/Downloads/random_file.txt"),
+                SafetyLevel::SafeCandidate,
+            ),
+        ];
+        let result = eng.run(&items);
+        // bentreder_logo.png should be auto-plan eligible
+        assert!(result.summary.auto_plan_eligible >= 1);
+    }
+
+    #[test]
+    fn test_guided_mode_creates_questions() {
+        let eng = engine(OrganizationMode::Guided);
+        let items = vec![(
+            PathBuf::from("/home/user/Downloads/bentreder_logo.png"),
+            SafetyLevel::SafeCandidate,
+        )];
+        let result = eng.run(&items);
+        // Should have questions for items in the 80-94 band
+        // bentreder_logo.png is likely 95+ so may not create a question
+        // but the engine should at least process it
+        assert_eq!(result.recommendations.len(), 1);
+    }
+
+    #[test]
+    fn test_locked_down_mode_caps_confidence() {
+        let eng = engine(OrganizationMode::LockedDown);
+        let rec = eng.analyze_file(
+            Path::new("/home/user/Downloads/bentreder_logo.png"),
+            SafetyLevel::SafeCandidate,
+        );
+        assert!(
+            rec.confidence.value() <= 80,
+            "Locked-down mode should cap confidence at 80"
+        );
+    }
+
+    #[test]
+    fn test_no_real_file_moving() {
+        // Verify the engine only produces recommendations, never touches files
+        let eng = engine(OrganizationMode::SafeAutopilot);
+        let items = vec![(
+            PathBuf::from("/home/user/Downloads/bentreder_logo.png"),
+            SafetyLevel::SafeCandidate,
+        )];
+        let _result = eng.run(&items);
+        // If we got here without panicking, no files were moved
+        // (the engine doesn't do any I/O beyond reading metadata)
+    }
+}

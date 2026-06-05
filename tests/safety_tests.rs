@@ -1,0 +1,600 @@
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
+
+/// Helper: create a file with optional content.
+fn create_file(path: &std::path::Path, content: &str) {
+    fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new("/"))).unwrap();
+    fs::write(path, content).unwrap();
+}
+
+/// Helper: create an empty file.
+fn touch(path: &std::path::Path) {
+    create_file(path, "");
+}
+
+fn to_pb(tmp: &TempDir) -> PathBuf {
+    tmp.path().to_path_buf()
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. Systemd-referenced paths are LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_systemd_detector_finds_references() {
+    // Test that the systemd detector can parse unit files
+    let detector = safesort_ai::detectors::systemd::SystemdDetector::new();
+    let evidence = detector.scan_all();
+
+    // It should either find evidence or skip gracefully (permission denied)
+    // The key thing is it doesn't panic
+    for ev in &evidence {
+        // If it found systemd references, they should mention systemd
+        assert!(
+            ev.description.contains("systemd") || ev.note.is_some(),
+            "Systemd evidence should be properly described"
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. .env folders are LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_env_folder_is_locked() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let project = base.join("my-project");
+    fs::create_dir_all(&project).unwrap();
+    create_file(&project.join(".env"), "SECRET_KEY=abc123\n");
+    touch(&project.join("app.py"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 2).unwrap();
+
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked.iter().any(|i| i.path.contains(".env")),
+        ".env file should be LOCKED"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. Git repos are REVIEW
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_git_repo_is_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let repo = base.join("my-rust-project");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    touch(&repo.join(".git/config"));
+    create_file(
+        &repo.join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    );
+    touch(&repo.join("src/main.rs"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 2).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("my-rust-project")),
+        "Git repo should be REVIEW"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. Loose screenshots in Downloads are SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_loose_screenshot_in_downloads_is_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    touch(&downloads.join("Screenshot-2026-06-04.png"));
+    touch(&downloads.join("Screenshot-2026-06-03.jpg"));
+    touch(&downloads.join("photo.jpeg"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        safe.iter()
+            .any(|i| i.path.contains("Screenshot-2026-06-04.png")),
+        "Loose screenshot in Downloads should be SAFE_CANDIDATE"
+    );
+    assert!(
+        safe.iter()
+            .any(|i| i.path.contains("Screenshot-2026-06-03.jpg")),
+        "Loose screenshot in Downloads should be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. Loose PDFs in Downloads are SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_loose_pdf_in_downloads_is_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    touch(&downloads.join("report-Q1-2026.pdf"));
+    touch(&downloads.join("invoice-2025.pdf"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        safe.iter().any(|i| i.path.contains("report-Q1-2026.pdf")),
+        "Loose PDF in Downloads should be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 6. Symlink targets are LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_symlink_is_classified() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let target = base.join("real-folder");
+    fs::create_dir_all(&target).unwrap();
+    touch(&target.join("data.txt"));
+
+    let link = base.join("link-to-folder");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 2).unwrap();
+
+    // The symlink itself should be LOCKED (safety policy: symlink targets are LOCKED)
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked.iter().any(|i| i.path.contains("link-to-folder")),
+        "Symlink 'link-to-folder' should be LOCKED by safety policy"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 7. /etc, /usr, /var, /boot are always LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_system_paths_are_locked() {
+    use safesort_ai::scan::classifier::Classifier;
+    use safesort_ai::scan::item::ScanItem;
+
+    let classifier = Classifier::new();
+    let home = PathBuf::from("/home/testuser");
+
+    for sys_path in &["/etc", "/usr", "/var", "/boot", "/opt", "/srv"] {
+        let item = ScanItem {
+            path: PathBuf::from(sys_path).join("something"),
+            name: "something".to_string(),
+            is_dir: true,
+            is_symlink: false,
+            symlink_target: None,
+            extension: None,
+            depth: 1,
+            is_hidden: false,
+        };
+
+        let classification = classifier.classify(&item, &PathBuf::from("/"), &home);
+        assert_eq!(
+            classification.level,
+            safesort_ai::scan::risk::SafetyLevel::Locked,
+            "{} should be LOCKED",
+            sys_path
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 8. Apply refuses to run
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_refuses_to_run() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply").arg("some-plan").assert().success().stdout(
+        predicate::str::contains("Apply is disabled in this safety-first build")
+            .and(predicate::str::contains("Nothing was moved")),
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 9. No code path moves or deletes files (scan is read-only)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_scan_is_read_only() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    touch(&downloads.join("file1.png"));
+    touch(&downloads.join("file2.pdf"));
+    touch(&downloads.join("file3.zip"));
+
+    let project = base.join("home/Projects/webapp");
+    fs::create_dir_all(project.join("src")).unwrap();
+    create_file(
+        &project.join("package.json"),
+        "{\n  \"name\": \"test\"\n}\n",
+    );
+    touch(&project.join("src/index.js"));
+
+    let count_before = count_files_recursively(&base);
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let _report = scanner.scan(&base.join("home"), &home, 3).unwrap();
+
+    let count_after = count_files_recursively(&base);
+
+    assert_eq!(
+        count_before, count_after,
+        "Scan must not create, move, or delete any files"
+    );
+
+    assert!(
+        downloads.join("file1.png").exists(),
+        "file1.png must still exist"
+    );
+    assert!(
+        downloads.join("file2.pdf").exists(),
+        "file2.pdf must still exist"
+    );
+    assert!(
+        project.join("package.json").exists(),
+        "package.json must still exist"
+    );
+}
+
+fn count_files_recursively(dir: &std::path::Path) -> usize {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .count()
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 10. WordPress plugin folder is REVIEW
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_wordpress_plugin_is_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let plugin = base.join("wp-content/plugins/my-plugin");
+    fs::create_dir_all(&plugin).unwrap();
+    create_file(
+        &plugin.join("my-plugin.php"),
+        "<?php\n/**\n * Plugin Name: My Plugin\n */\n",
+    );
+    create_file(
+        &plugin.join("composer.json"),
+        "{\n  \"name\": \"test/my-plugin\"\n}\n",
+    );
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 3).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("my-plugin")),
+        "WordPress plugin folder should be REVIEW"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 11. private_* folders are LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_private_folder_is_locked() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let private = base.join("private_keys");
+    fs::create_dir_all(&private).unwrap();
+    touch(&private.join("backup.pem"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 2).unwrap();
+
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked.iter().any(|i| i.path.contains("private_keys")),
+        "private_* folder should be LOCKED"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 12. Script with absolute path references
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_script_with_absolute_path() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let scripts = base.join("scripts");
+    fs::create_dir_all(&scripts).unwrap();
+    create_file(
+        &scripts.join("deploy.sh"),
+        "#!/bin/bash\nDEPLOY_DIR=/home/user/ImportantApp\ncd $DEPLOY_DIR\n./deploy\n",
+    );
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&scripts, &home, 1).unwrap();
+
+    let all_items: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .filter(|i| i.path.contains("deploy.sh"))
+        .collect();
+    assert!(
+        !all_items.is_empty(),
+        "deploy.sh should appear in scan results"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 13. Sensitive .ssh folder is LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_ssh_folder_is_locked() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let ssh = base.join("home/.ssh");
+    fs::create_dir_all(&ssh).unwrap();
+    create_file(
+        &ssh.join("id_rsa"),
+        "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
+    );
+    create_file(
+        &ssh.join("id_ed25519"),
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
+    );
+    create_file(&ssh.join("config"), "Host *\n  ForwardAgent no\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&home, &home, 2).unwrap();
+
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked.iter().any(|i| i.path.contains(".ssh")),
+        ".ssh directory should be LOCKED"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 14. Archive files in Downloads are SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_archive_in_downloads_is_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    touch(&downloads.join("project-archive.zip"));
+    touch(&downloads.join("backup-2025.tar.gz"));
+    touch(&downloads.join("data.tgz"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        safe.iter().any(|i| i.path.contains("project-archive.zip")),
+        "ZIP in Downloads should be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 15. Node.js project is REVIEW
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_node_project_is_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let project = base.join("Projects/webapp");
+    fs::create_dir_all(project.join("src")).unwrap();
+    create_file(
+        &project.join("package.json"),
+        "{\n  \"name\": \"webapp\",\n  \"version\": \"1.0.0\"\n}\n",
+    );
+    touch(&project.join("node_modules/.keep"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("webapp")),
+        "Node.js project should be REVIEW"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 16. Python project is REVIEW
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_python_project_is_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let project = base.join("Projects/data-tool");
+    fs::create_dir_all(&project).unwrap();
+    create_file(
+        &project.join("pyproject.toml"),
+        "[project]\nname = \"data-tool\"\nversion = \"0.1.0\"\n",
+    );
+    create_file(
+        &project.join("requirements.txt"),
+        "requests>=2.28\npandas>=1.5\n",
+    );
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("data-tool")),
+        "Python project should be REVIEW"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 17. Docker project is REVIEW
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_docker_project_is_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let project = base.join("Projects/docker-app");
+    fs::create_dir_all(&project).unwrap();
+    create_file(
+        &project.join("Dockerfile"),
+        "FROM rust:latest\nWORKDIR /app\nCOPY . .\nRUN cargo build --release\n",
+    );
+    create_file(
+        &project.join("docker-compose.yml"),
+        "version: '3'\nservices:\n  app:\n    build: .\n    ports:\n      - \"8080:8080\"\n",
+    );
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base.join("Projects"), &home, 2).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("docker-app")),
+        "Docker project should be REVIEW"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 18. Website folder is LOCKED
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_website_folder_is_locked() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let website = base.join("public_html");
+    fs::create_dir_all(&website).unwrap();
+    create_file(&website.join("index.php"), "<?php echo 'Hello'; ?>\n");
+    create_file(&website.join(".env"), "DB_PASSWORD=secret\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.clone();
+    let report = scanner.scan(&base, &home, 2).unwrap();
+
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked.iter().any(|i| i.path.contains("public_html")),
+        "Website folder with .env should be LOCKED"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 19. CSV exports in Downloads are SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_csv_in_downloads_is_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    create_file(&downloads.join("export.csv"), "id,name,value\n1,test,100\n");
+    create_file(&downloads.join("notes.txt"), "Some notes here\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        safe.iter().any(|i| i.path.contains("export.csv")),
+        "CSV export in Downloads should be SAFE_CANDIDATE"
+    );
+    assert!(
+        safe.iter().any(|i| i.path.contains("notes.txt")),
+        "Text notes in Downloads should be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 20. Media files in Downloads are SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_media_in_downloads_is_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    let downloads = base.join("home/Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    touch(&downloads.join("presentation.mp4"));
+    touch(&downloads.join("recording.wav"));
+    touch(&downloads.join("animation.gif"));
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let home = base.join("home");
+    let report = scanner.scan(&downloads, &home, 1).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        safe.iter().any(|i| i.path.contains("presentation.mp4")),
+        "MP4 in Downloads should be SAFE_CANDIDATE"
+    );
+}

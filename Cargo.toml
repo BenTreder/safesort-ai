@@ -1,0 +1,32 @@
+[package]
+name = "safesort-ai"
+version = "0.1.0"
+edition = "2024"
+authors = ["SafeSort AI Team"]
+description = "Safety-first folder organizer — scans, classifies, and recommends without moving anything"
+license = "MIT"
+repository = "https://github.com/safesort-ai/safesort"
+
+[[bin]]
+name = "safesort"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "2.0"
+walkdir = "2.5"
+regex = "1.11"
+chrono = { version = "0.4", features = ["serde"] }
+owo-colors = { version = "4.1", features = ["supports-colors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "6.0"
+indexmap = { version = "2.7", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3.15"
+assert_cmd = "2.0"
+predicates = "3.1"
