@@ -1,4 +1,5 @@
 use crate::cli::{Cli, Commands, OrgMode, OutputFormat};
+use crate::config::DEFAULT_HEAVY_EXCLUDES;
 use crate::detectors;
 use crate::error::{Result, SafeSortError};
 use crate::manifest::build_plan_manifest;
@@ -8,7 +9,9 @@ use crate::profile::folder_structure;
 use crate::reports;
 use crate::rules_file::RulesFile;
 use crate::scan::Scanner;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 const SCAN_DEPTH: usize = 2;
 
@@ -153,6 +156,27 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             cmd_preflight(&p)
         }
+        Commands::Organize {
+            path,
+            mode,
+            depth,
+            exclude,
+            rule_file,
+            manifest_output,
+            no_default_excludes,
+        } => {
+            let rules = load_rules(&rule_file)?;
+            cmd_organize(
+                path,
+                mode,
+                depth,
+                &exclude,
+                rules.as_ref(),
+                rule_file.as_deref(),
+                manifest_output.as_deref(),
+                no_default_excludes,
+            )
+        }
         Commands::Apply {
             manifest,
             confirm,
@@ -193,17 +217,41 @@ fn resolve_target(path: Option<String>, home: bool) -> Result<PathBuf> {
 
 fn doctor() -> Result<()> {
     println!();
-    println!("  SafeSort AI — System Diagnostics");
-    println!("  ─────────────────────────────────");
+    println!("  SafeSort AI — System Status");
     println!();
+    println!("  Version:             {}", env!("CARGO_PKG_VERSION"));
+    println!("  Build:               Safety-first MVP");
+    println!("  Default safety mode: dry-run (nothing moves)");
+    println!();
+    println!("  ─── Movement Engine ────────────────────────────────");
+    println!("  apply command:       DISABLED (refuses to move files)");
+    println!("  Real file movement:  DISABLED");
+    println!("  Safe Autopilot:      Plan-only (no movement)");
+    println!("  Guided Review:       Question queue only (no movement)");
+    println!("  Manifests:           Dry-run proof records only");
+    println!();
+    println!("  ─── Available Safety Features ──────────────────────");
+    println!("  ✅ scan          — read-only safety classification");
+    println!("  ✅ plan          — placement recommendations (no movement)");
+    println!("  ✅ organize      — premium guided workflow (no movement)");
+    println!("  ✅ manifest      — SHA-256 checksum dry-run records");
+    println!("  ✅ preflight     — validates all safety gates (no movement)");
+    println!("  ✅ explain       — per-path safety explanation");
+    println!("  ✅ profile       — user profile detection");
+    println!("  ✅ rule-file     — custom aliases/protected paths (read-only, explicit only)");
+    println!();
+    println!("  ─── System Environment ─────────────────────────────");
 
     match dirs::home_dir() {
-        Some(home) => println!("  ✅ Home: {}", home.display()),
-        None => println!("  ❌ Home: not found"),
+        Some(home) => println!("  Home: {}", home.display()),
+        None => println!("  Home: not found"),
     }
 
-    println!("  ℹ️  OS: {}", std::env::consts::OS);
-    println!("  ℹ️  Arch: {}", std::env::consts::ARCH);
+    println!(
+        "  OS: {} / {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
 
     for dir in crate::config::SYSTEMD_PATHS {
         let path = Path::new(dir);
@@ -214,7 +262,7 @@ fn doctor() -> Result<()> {
                 "⚠️  permission denied"
             }
         } else {
-            "  (not found)"
+            "(not found)"
         };
         println!("  Systemd {dir}: {status}");
     }
@@ -228,14 +276,264 @@ fn doctor() -> Result<()> {
                 "⚠️  permission denied"
             }
         } else {
-            "  (not found)"
+            "(not found)"
         };
         println!("  Cron {dir}: {status}");
     }
 
     println!();
-    println!("  Note: Permission denied is normal and handled safely.");
-    println!("  SafeSort AI will skip inaccessible areas.");
+    println!("  No files are moved by scan / plan / organize / preflight.");
+    println!();
+
+    Ok(())
+}
+
+// ─── Organize ──────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_organize(
+    path: Option<String>,
+    mode: OrgMode,
+    depth: usize,
+    exclude: &[String],
+    rules: Option<&RulesFile>,
+    rule_file_path: Option<&str>,
+    manifest_output: Option<&str>,
+    no_default_excludes: bool,
+) -> Result<()> {
+    // Step 1: Resolve path — prompt if missing.
+    let raw_path = match path {
+        Some(p) => p,
+        None => {
+            print!("  Enter folder path to organize: ");
+            io::stdout().flush()?;
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            line.trim().to_string()
+        }
+    };
+
+    // Step 2: Validate path.
+    let target = PathBuf::from(&raw_path);
+    if !target.exists() {
+        return Err(SafeSortError::InvalidPath(format!(
+            "Path does not exist: {raw_path}"
+        )));
+    }
+
+    // Check dangerous roots.
+    let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
+    for danger in crate::config::DANGEROUS_ROOTS {
+        if canonical == PathBuf::from(danger) {
+            return Err(SafeSortError::InvalidPath(format!(
+                "Refusing to organize dangerous root path: {raw_path}"
+            )));
+        }
+    }
+
+    // Step 3: Build effective excludes.
+    let mut effective_excludes = exclude.to_vec();
+    if !no_default_excludes {
+        for pat in DEFAULT_HEAVY_EXCLUDES {
+            if !effective_excludes.iter().any(|e| e == pat) {
+                effective_excludes.push(pat.to_string());
+            }
+        }
+    }
+
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+    let org = org_mode(mode);
+
+    // Step 4: Print header.
+    println!();
+    println!("  ╔═══════════════════════════════════════════════════╗");
+    println!("  ║   SafeSort AI — Premium Organization Workflow     ║");
+    println!("  ╚═══════════════════════════════════════════════════╝");
+    println!();
+    println!("  Target:  {}", target.display());
+    println!("  Mode:    {}", org.as_str());
+    println!("  ⚠️  SafeSort AI will NOT move anything in this MVP build.");
+    println!();
+
+    // Step 5: Scan with timing.
+    print!("  Scanning...");
+    io::stdout().flush()?;
+    let scan_start = Instant::now();
+    let scanner = build_scanner(rules);
+    let report = scanner.scan(&target, &home, depth, &effective_excludes)?;
+    let elapsed_ms = scan_start.elapsed().as_millis();
+
+    let total_items = report.summary.total;
+    let skipped_items = report.summary.skipped;
+    println!(
+        "  ({} items in {}ms, {} skipped by default excludes)",
+        total_items, elapsed_ms, skipped_items
+    );
+    println!();
+
+    // Step 6: Build placement.
+    let items: Vec<(PathBuf, crate::scan::risk::SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|item| {
+            let level = match item.safety_level.as_str() {
+                "LOCKED" => crate::scan::risk::SafetyLevel::Locked,
+                "REVIEW" => crate::scan::risk::SafetyLevel::Review,
+                _ => crate::scan::risk::SafetyLevel::SafeCandidate,
+            };
+            (PathBuf::from(&item.path), level)
+        })
+        .collect();
+
+    let engine = SmartPlacementEngine::new(home.clone(), org);
+    let engine = if let Some(r) = rules {
+        engine.with_rules(r)
+    } else {
+        engine
+    };
+    let mut placement = engine.run(&items);
+    placement.summary.skipped = report.summary.skipped;
+
+    // Step 7: Print premium organize output.
+    println!("  ─── Safety Classification ──────────────────────────");
+    println!(
+        "  🔒 LOCKED          {:>4}  (never touch)",
+        report.summary.locked
+    );
+    println!(
+        "  ⚠️  REVIEW         {:>4}  (needs human review)",
+        report.summary.review
+    );
+    println!(
+        "  ✅ SAFE CANDIDATE  {:>4}  (can be organized safely)",
+        report.summary.safe_candidate
+    );
+    println!(
+        "  ⊘  SKIPPED        {:>4}  (heavy folders excluded)",
+        report.summary.skipped
+    );
+    println!();
+
+    println!("  ─── Impact Assessment ──────────────────────────────");
+    println!("  🔴 CRITICAL      {:>4}", report.summary.impact_critical);
+    println!("  🟠 HIGH          {:>4}", report.summary.impact_high);
+    println!("  ⚠️  MEDIUM       {:>4}", report.summary.impact_medium);
+    println!("  🟢 LOW           {:>4}", report.summary.impact_low);
+    println!("  ✅ NONE          {:>4}", report.summary.impact_none);
+    println!();
+
+    // User profile bar.
+    if let Some(ref profile) = report.profile {
+        println!("  ─── User Profile ───────────────────────────────────");
+        let sorted = profile.sorted_scores();
+        let top: Vec<_> = sorted
+            .iter()
+            .filter(|(_, s)| s.score > 0.0)
+            .take(3)
+            .collect();
+        if !top.is_empty() {
+            let profile_line: Vec<String> = top
+                .iter()
+                .map(|(name, score)| {
+                    let filled = ((score.score / 10.0) * 3.0).round() as usize;
+                    let empty = 3usize.saturating_sub(filled);
+                    let bar = "●".repeat(filled) + &"○".repeat(empty);
+                    format!("{} {}", name, bar)
+                })
+                .collect();
+            println!("  {}", profile_line.join("  "));
+            println!();
+        }
+    }
+
+    // Top findings.
+    println!("  ─── Top Findings ───────────────────────────────────");
+    let locked_items: Vec<_> = report
+        .items
+        .get("LOCKED")
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .take(5)
+        .collect();
+    if !locked_items.is_empty() {
+        println!("  🔒 LOCKED:");
+        for item in locked_items {
+            let name = PathBuf::from(&item.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&item.path)
+                .to_string();
+            println!(
+                "     {} — {} ({})",
+                name,
+                item.impact_level,
+                item.reasons.first().map(|r| r.as_str()).unwrap_or("locked")
+            );
+        }
+    }
+    println!();
+
+    // Organization recommendations.
+    println!("  ─── Organization Recommendations ───────────────────");
+    let safe_recs: Vec<_> = placement
+        .recommendations
+        .iter()
+        .filter(|r| !matches!(r.safety_level, crate::scan::risk::SafetyLevel::Locked))
+        .filter(|r| r.confidence.value() >= 70)
+        .take(8)
+        .collect();
+
+    if safe_recs.is_empty() {
+        println!("  (no high-confidence safe candidates found)");
+    } else {
+        println!("  ({} SAFE files can be staged)", safe_recs.len());
+        for rec in &safe_recs {
+            let name = rec
+                .file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+            if let Some(dest) = rec.destinations.first() {
+                println!("  → {:<30} → {}", name, dest.path.display());
+            }
+        }
+    }
+    println!();
+
+    // Step 9: Write manifest if requested.
+    if let Some(manifest_path) = manifest_output {
+        let manifest = build_plan_manifest(
+            &target,
+            org,
+            &placement.recommendations,
+            rule_file_path,
+            placement.summary.total_files,
+        );
+        let json = serde_json::to_string_pretty(&manifest)?;
+        std::fs::write(manifest_path, &json)?;
+        println!("  Manifest written to: {manifest_path}  (dry_run_only=true — nothing was moved)");
+        println!();
+    }
+
+    // Step 10: Next steps.
+    println!("  ─── Next Steps ─────────────────────────────────────");
+    println!("  1. Generate manifest:");
+    println!(
+        "     safesort manifest --path {} --output manifest.json",
+        target.display()
+    );
+    println!("  2. Validate with preflight:");
+    println!("     safesort preflight manifest.json");
+    println!("  3. Explain a specific path:");
+    println!("     safesort explain <path>");
+    println!("  4. Apply (currently disabled — review manifests first):");
+    println!("     safesort apply manifest.json --confirm --i-understand-this-moves-files");
+    println!();
+
+    // Step 11: Final safety note.
+    println!("  Nothing was moved.");
     println!();
 
     Ok(())

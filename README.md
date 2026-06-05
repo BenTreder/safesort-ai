@@ -26,7 +26,29 @@ SafeSort AI doesn't just organize by file type — it organizes by **ownership, 
 
 SafeSort **never** places files directly into live website roots by default. It uses safe staging destinations.
 
+## Quick Start
+
+```bash
+# Premium guided workflow (recommended)
+safesort organize --path ~/Downloads
+
+# Or step by step:
+safesort scan --path ~/Downloads
+safesort plan --path ~/Downloads --mode guided
+safesort manifest --path ~/Downloads --output manifest.json
+safesort preflight manifest.json
+```
+
 ## Organization Modes
+
+### Organize (Premium Guided Workflow)
+```bash
+safesort organize --path ~/Downloads
+safesort organize --path ~/Downloads --mode guided
+safesort organize --path ~/Downloads --manifest-output manifest.json
+safesort organize  # prompts for path interactively
+```
+All-in-one premium workflow: scans, classifies, profiles, and recommends. Nothing is moved.
 
 ### Preview Mode (default)
 ```bash

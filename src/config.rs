@@ -89,6 +89,24 @@ pub const CRON_PATHS: &[&str] = &[
     "/etc/cron.monthly",
 ];
 
+/// Heavy build/cache folders excluded by default in organize and plan for speed.
+/// Safety-critical project markers (.git, Cargo.toml etc.) are still detected
+/// because the classifier runs on the project root directory itself, not just its contents.
+pub const DEFAULT_HEAVY_EXCLUDES: &[&str] = &[
+    "node_modules",
+    "target",
+    "vendor",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".cache",
+];
+
+/// Dangerous root paths that must never be used as organize targets.
+pub const DANGEROUS_ROOTS: &[&str] = &[
+    "/", "/etc", "/usr", "/var", "/boot", "/run", "/proc", "/sys", "/dev",
+];
+
 /// Prefix the user's home directory to a relative sensitive-path name.
 pub fn sensitive_home_path(home: &std::path::Path, name: &str) -> PathBuf {
     home.join(name)

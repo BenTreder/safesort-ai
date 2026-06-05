@@ -143,6 +143,25 @@ pub enum Commands {
         manifest: String,
     },
 
+    /// Premium guided organization workflow (safe — nothing is moved)
+    Organize {
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: OrgMode,
+        #[arg(long, default_value = "2")]
+        depth: usize,
+        #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
+        exclude: Vec<String>,
+        #[arg(long, value_name = "FILE")]
+        rule_file: Option<String>,
+        #[arg(long, value_name = "FILE")]
+        manifest_output: Option<String>,
+        /// Skip default heavy-folder auto-excludes (node_modules, target, .venv, etc.)
+        #[arg(long)]
+        no_default_excludes: bool,
+    },
+
     /// Apply a plan (DISABLED in this safety-first build)
     ///
     /// Even with all flags present, apply will not move files in this MVP build.

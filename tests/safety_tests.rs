@@ -2620,3 +2620,264 @@ fn test_no_move_delete_rename_in_preflight_code() {
         "run_preflight must not modify any files on disk"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 83–92. organize command tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_organize_with_path_moves_nothing() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let tmp = TempDir::new().unwrap();
+    touch(&tmp.path().join("photo.jpg"));
+    touch(&tmp.path().join("report.pdf"));
+
+    let before: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("organize")
+        .arg("--path")
+        .arg(tmp.path().to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+
+    let after: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(before, after, "organize must not move or create any files");
+}
+
+#[test]
+fn test_organize_refuses_dangerous_root() {
+    use assert_cmd::Command;
+
+    for root in &["/etc", "/usr", "/var", "/boot"] {
+        let mut cmd = Command::cargo_bin("safesort").unwrap();
+        let output = cmd
+            .arg("organize")
+            .arg("--path")
+            .arg(root)
+            .output()
+            .unwrap();
+
+        // Should either fail (non-zero exit) or print a refusal message
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let combined = format!("{stdout}{stderr}");
+        let refused = !output.status.success()
+            || combined.contains("Refusing")
+            || combined.contains("dangerous")
+            || combined.contains("does not exist");
+        assert!(
+            refused,
+            "organize must refuse dangerous root '{root}', got: {combined}"
+        );
+    }
+}
+
+#[test]
+fn test_organize_with_rule_file() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let tmp = TempDir::new().unwrap();
+    touch(&tmp.path().join("photo.jpg"));
+
+    let rule_path = tmp.path().join("rules.toml");
+    fs::write(
+        &rule_path,
+        "[aliases]\n\"photo\" = \"SomeBrand\"\n[protected_paths]\npaths = []\n",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("organize")
+        .arg("--path")
+        .arg(tmp.path().to_str().unwrap())
+        .arg("--rule-file")
+        .arg(rule_path.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_organize_with_manifest_output_creates_dry_run_manifest() {
+    use assert_cmd::Command;
+
+    let tmp = TempDir::new().unwrap();
+    touch(&tmp.path().join("photo.jpg"));
+
+    let manifest_path = tmp.path().join("manifest.json");
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("organize")
+        .arg("--path")
+        .arg(tmp.path().to_str().unwrap())
+        .arg("--manifest-output")
+        .arg(manifest_path.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(manifest_path.exists(), "manifest file must be created");
+
+    let content = fs::read_to_string(&manifest_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(
+        parsed["dry_run_only"],
+        serde_json::Value::Bool(true),
+        "manifest must have dry_run_only=true"
+    );
+}
+
+#[test]
+fn test_organize_ends_with_nothing_was_moved() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let tmp = TempDir::new().unwrap();
+    touch(&tmp.path().join("doc.pdf"));
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("organize")
+        .arg("--path")
+        .arg(tmp.path().to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_default_excludes_do_not_make_items_auto_plan_eligible() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    // These are inside default-excluded folders — they would be safe candidates
+    // outside node_modules, but the folder should be excluded.
+    create_file(&base.join("node_modules/some_pkg/logo.png"), "");
+    create_file(&base.join("target/debug/binary"), "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let excludes: Vec<String> = safesort_ai::config::DEFAULT_HEAVY_EXCLUDES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let report = scanner.scan(&base, &base, 4, &excludes).unwrap();
+
+    let all_paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.path.clone())
+        .collect();
+    assert!(
+        !all_paths.iter().any(|p| p.contains("node_modules")),
+        "node_modules items must not appear when default excludes are active"
+    );
+    assert!(
+        !all_paths.iter().any(|p| {
+            // target/debug/binary — but be careful: the path may contain "target" as a prefix
+            p.contains("target/debug") || p.ends_with("binary")
+        }),
+        "target/debug items must not appear when default excludes are active"
+    );
+}
+
+#[test]
+fn test_project_marker_detected_even_with_default_excludes() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    // A git repo root — should still be detected as REVIEW even when 'target' is excluded.
+    let repo = base.join("myproject");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    touch(&repo.join(".git/config"));
+    create_file(
+        &repo.join("Cargo.toml"),
+        "[package]\nname = \"myproject\"\nversion = \"0.1.0\"\n",
+    );
+    // The target dir should be excluded but the project itself should still appear.
+    create_file(&repo.join("target/debug/myproject"), "binary");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let excludes: Vec<String> = safesort_ai::config::DEFAULT_HEAVY_EXCLUDES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let report = scanner.scan(&base, &base, 3, &excludes).unwrap();
+
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("myproject")),
+        "Git project root must still be REVIEW even when target is excluded"
+    );
+
+    // target/debug binary must NOT appear
+    let all_paths: Vec<_> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| i.path.clone())
+        .collect();
+    assert!(
+        !all_paths.iter().any(|p| p.contains("target/debug")),
+        "target/debug items must be excluded by default excludes"
+    );
+}
+
+#[test]
+fn test_doctor_shows_apply_disabled() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("DISABLED"));
+}
+
+#[test]
+fn test_apply_still_refuses_no_flags() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_no_destructive_ops_in_src() {
+    // Grep check: verify no fs::rename, fs::copy, fs::remove_file in src/
+    let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let forbidden = ["fs::rename", "fs::copy", "fs::remove_file"];
+
+    for entry in walkdir::WalkDir::new(&src_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("rs"))
+    {
+        let content = fs::read_to_string(entry.path()).unwrap_or_default();
+        for op in &forbidden {
+            assert!(
+                !content.contains(op),
+                "Destructive op '{}' found in {}",
+                op,
+                entry.path().display()
+            );
+        }
+    }
+}

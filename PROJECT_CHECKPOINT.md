@@ -1,12 +1,12 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 3 MVP — preflight, hardened apply, manifest)
-**Version**: 0.4.0
-**Phase**: 3 MVP complete — SHA-256 checksum, rollback manifest, preflight, hardened apply stub
+**Date**: 2026-06-05 (Phase 4 MVP Polish — organize command, doctor upgrade, DEFAULT_HEAVY_EXCLUDES)
+**Version**: 0.5.0
+**Phase**: 4 MVP polish complete — `organize` premium workflow, upgraded doctor, 10 new tests
 
 ## Safety Audit Summary (2026-06-05)
 
-- **217 tests passing** (62 lib + 50 bin + 23 placement + 82 safety)
+- **227 tests passing** (62 lib + 50 bin + 23 placement + 92 safety)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
