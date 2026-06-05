@@ -40,6 +40,8 @@ pub struct PlacementRecommendation {
     pub file_name: String,
     /// Safety level from the scan engine.
     pub safety_level: SafetyLevel,
+    /// Dependency impact level: CRITICAL, HIGH, MEDIUM, LOW, NONE.
+    pub impact_level: String,
     /// Detected owner, if any.
     pub owner: Option<super::ownership::DetectedOwner>,
     /// Detected purpose.
@@ -175,10 +177,18 @@ impl SmartPlacementEngine {
             }
         };
 
+        let impact_level = match safety_level {
+            SafetyLevel::Locked => "CRITICAL",
+            SafetyLevel::Review => "MEDIUM",
+            SafetyLevel::SafeCandidate => "NONE",
+        }
+        .to_string();
+
         PlacementRecommendation {
             file_path: file_path.to_path_buf(),
             file_name,
             safety_level,
+            impact_level,
             owner,
             purpose,
             file_type,
@@ -210,12 +220,15 @@ impl SmartPlacementEngine {
 
             match rec.band {
                 ConfidenceBand::AutoPlan => {
-                    if self.mode == OrganizationMode::SafeAutopilot
-                        || self.mode == OrganizationMode::Guided
+                    // Never auto-plan items with MEDIUM/HIGH/CRITICAL impact.
+                    let impact_ok = matches!(rec.impact_level.as_str(), "NONE" | "LOW");
+                    if impact_ok
+                        && (self.mode == OrganizationMode::SafeAutopilot
+                            || self.mode == OrganizationMode::Guided)
                     {
                         summary.auto_plan_eligible += 1;
                     } else {
-                        // Preview/locked-down: don't auto-plan
+                        // Preview/locked-down or high-impact: don't auto-plan
                         summary.review_needed += 1;
                     }
                 }

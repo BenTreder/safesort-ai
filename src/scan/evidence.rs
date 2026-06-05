@@ -66,6 +66,9 @@ pub enum EvidenceKind {
     /// Permission denied while scanning this path.
     PermissionSkipped,
 
+    /// Safety level inherited from a parent directory.
+    InheritedRisk,
+
     /// The item contains shell scripts.
     ContainsScripts,
 

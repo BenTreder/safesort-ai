@@ -864,3 +864,450 @@ fn test_no_destructive_ops_combined() {
         "No files should be created, moved, or deleted by scan"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 28. Scan summary includes impact counts
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_scan_summary_includes_impact_counts() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    // LOCKED with SensitiveFile → CRITICAL impact
+    let app = base.join("ImportantApp");
+    fs::create_dir_all(&app).unwrap();
+    create_file(&app.join(".env"), "SECRET=x\n");
+
+    // REVIEW with project marker → MEDIUM impact
+    let proj = base.join("Projects/myapp");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    create_file(&proj.join("Cargo.toml"), "[package]\nname=\"myapp\"\n");
+
+    // SAFE in Downloads → LOW impact
+    let dl = base.join("Downloads");
+    fs::create_dir_all(&dl).unwrap();
+    create_file(&dl.join("report.pdf"), "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 3).unwrap();
+
+    // The summary must have all five impact fields
+    let s = &report.summary;
+    assert_eq!(
+        s.impact_critical + s.impact_high + s.impact_medium + s.impact_low + s.impact_none,
+        s.total,
+        "impact counts must sum to total"
+    );
+    // At least one CRITICAL and one MEDIUM
+    assert!(s.impact_critical >= 1, "expected ≥1 CRITICAL-impact item");
+    assert!(s.impact_medium >= 1, "expected ≥1 MEDIUM-impact item");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 29. ImportantApp .env file contributes CRITICAL impact
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_important_app_env_contributes_critical_impact() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let app = base.join("ImportantApp");
+    fs::create_dir_all(&app).unwrap();
+    create_file(&app.join(".env"), "SECRET=x\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2).unwrap();
+
+    let all_items: Vec<_> = report.items.values().flatten().collect();
+    let env_item = all_items
+        .iter()
+        .find(|i| i.path.ends_with(".env"))
+        .expect(".env should appear in scan results");
+
+    assert_eq!(
+        env_item.impact_level, "CRITICAL",
+        ".env file should have CRITICAL impact"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 30. Active Rust project contributes MEDIUM impact
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_rust_project_contributes_medium_impact() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let proj = base.join("safesort-ai");
+    fs::create_dir_all(proj.join("src")).unwrap();
+    create_file(
+        &proj.join("Cargo.toml"),
+        "[package]\nname=\"safesort-ai\"\n",
+    );
+    create_file(&proj.join("src/main.rs"), "fn main() {}");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2).unwrap();
+
+    let all_items: Vec<_> = report.items.values().flatten().collect();
+    let proj_item = all_items
+        .iter()
+        .find(|i| i.path.ends_with("safesort-ai") && i.is_dir)
+        .expect("safesort-ai directory should appear in scan");
+
+    assert_eq!(
+        proj_item.impact_level, "MEDIUM",
+        "Rust project directory should have MEDIUM impact"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 31. Safe Autopilot does not auto-plan REVIEW items (MEDIUM impact)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_safe_autopilot_excludes_medium_impact_items() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let engine =
+        SmartPlacementEngine::new(PathBuf::from("/home/user"), OrganizationMode::SafeAutopilot);
+
+    // Provide one REVIEW item (project folder) and one SAFE item
+    let items = vec![
+        (
+            PathBuf::from("/home/user/Projects/safesort-ai"),
+            SafetyLevel::Review, // MEDIUM impact → must NOT be auto-planned
+        ),
+        (
+            PathBuf::from("/home/user/Downloads/bentreder_logo.png"),
+            SafetyLevel::SafeCandidate, // NONE impact → can be auto-planned
+        ),
+    ];
+
+    let result = engine.run(&items);
+
+    // The REVIEW item must never appear in auto_plan_eligible
+    let auto_planned: Vec<_> = result
+        .recommendations
+        .iter()
+        .filter(|r| r.confidence.is_auto_plan())
+        .collect();
+
+    assert!(
+        auto_planned
+            .iter()
+            .all(|r| !matches!(r.safety_level, SafetyLevel::Review)),
+        "REVIEW items (MEDIUM impact) must never be auto-planned"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 32. Guided mode tracks impact per recommendation
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_guided_mode_tracks_impact() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let engine = SmartPlacementEngine::new(PathBuf::from("/home/user"), OrganizationMode::Guided);
+
+    let items = vec![
+        (PathBuf::from("/home/user/.ssh/id_rsa"), SafetyLevel::Locked),
+        (
+            PathBuf::from("/home/user/Projects/myapp"),
+            SafetyLevel::Review,
+        ),
+        (
+            PathBuf::from("/home/user/Downloads/report.pdf"),
+            SafetyLevel::SafeCandidate,
+        ),
+    ];
+
+    let result = engine.run(&items);
+
+    // Every recommendation must carry an impact_level
+    for rec in &result.recommendations {
+        assert!(
+            matches!(
+                rec.impact_level.as_str(),
+                "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NONE"
+            ),
+            "impact_level must be a recognised value, got: {}",
+            rec.impact_level
+        );
+    }
+
+    // Locked item → CRITICAL
+    let locked_rec = result
+        .recommendations
+        .iter()
+        .find(|r| matches!(r.safety_level, SafetyLevel::Locked))
+        .unwrap();
+    assert_eq!(locked_rec.impact_level, "CRITICAL");
+
+    // Review item → MEDIUM
+    let review_rec = result
+        .recommendations
+        .iter()
+        .find(|r| matches!(r.safety_level, SafetyLevel::Review))
+        .unwrap();
+    assert_eq!(review_rec.impact_level, "MEDIUM");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 33. Apply still refuses (impact-wired build)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_refuses_after_impact_wiring() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("impact-plan.json")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Apply is disabled in this safety-first build")
+                .and(predicate::str::contains("Nothing was moved")),
+        );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 34. No destructive operations — impact scan does not touch files
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_impact_scan_no_destructive_ops() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let app = base.join("ImportantApp");
+    fs::create_dir_all(&app).unwrap();
+    create_file(&app.join(".env"), "SECRET=x\n");
+
+    let proj = base.join("Projects/myapp");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    create_file(&proj.join("Cargo.toml"), "[package]\n");
+
+    let dl = base.join("Downloads");
+    fs::create_dir_all(&dl).unwrap();
+    create_file(&dl.join("photo.png"), "");
+
+    let before: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let _report = scanner.scan(&base, &base, 3).unwrap();
+
+    let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "Impact-aware scan must not create, move, or delete any files"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 35. public_html/index.php must not be SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_public_html_child_is_not_safe_candidate() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let site = base.join("public_html");
+    fs::create_dir_all(&site).unwrap();
+    create_file(&site.join("index.php"), "<?php echo 'hello'; ?>\n");
+    create_file(&site.join("style.css"), "body { margin: 0; }\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2).unwrap();
+
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        !safe.iter().any(|i| i.path.contains("index.php")),
+        "index.php inside public_html must NOT be SAFE_CANDIDATE"
+    );
+    assert!(
+        !safe.iter().any(|i| i.path.contains("style.css")),
+        "style.css inside public_html must NOT be SAFE_CANDIDATE"
+    );
+
+    // Must be REVIEW (inherited from LOCKED live-site parent)
+    let review = report.get_examples("REVIEW", 100);
+    assert!(
+        review.iter().any(|i| i.path.contains("index.php")),
+        "index.php inside public_html must be REVIEW, not SAFE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 36. ImportantApp/config.yml inherits LOCKED parent → not SAFE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_important_app_child_is_not_safe_candidate() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let app = base.join("ImportantApp");
+    fs::create_dir_all(&app).unwrap();
+    create_file(&app.join(".env"), "SECRET=x\n");
+    create_file(&app.join("config.yml"), "port: 8080\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2).unwrap();
+
+    // ImportantApp itself must be LOCKED (contains .env)
+    let locked = report.get_examples("LOCKED", 100);
+    assert!(
+        locked
+            .iter()
+            .any(|i| i.path.ends_with("ImportantApp") || i.path.contains("ImportantApp")),
+        "ImportantApp directory (contains .env) must be LOCKED"
+    );
+
+    // config.yml must NOT be SAFE_CANDIDATE (inherited from LOCKED parent)
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        !safe.iter().any(|i| i.path.contains("config.yml")),
+        "config.yml inside LOCKED ImportantApp must NOT be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 37. Child of LOCKED parent is not auto-plan eligible (safe-autopilot)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_child_of_locked_parent_not_auto_plan_eligible() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let engine =
+        SmartPlacementEngine::new(PathBuf::from("/home/user"), OrganizationMode::SafeAutopilot);
+
+    // Simulate what the scanner now produces for a child of a LOCKED parent:
+    // the child is REVIEW (inherited), not SafeCandidate.
+    let items = vec![
+        (
+            PathBuf::from("/home/user/ImportantApp"),
+            SafetyLevel::Locked,
+        ),
+        (
+            // Child that inherited REVIEW from LOCKED parent
+            PathBuf::from("/home/user/ImportantApp/config.yml"),
+            SafetyLevel::Review,
+        ),
+    ];
+
+    let result = engine.run(&items);
+
+    assert_eq!(
+        result.summary.auto_plan_eligible, 0,
+        "No items inside a LOCKED parent should be auto-plan eligible"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 38. Child of CRITICAL parent (www/) is not auto-plan eligible
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_child_of_critical_live_site_not_auto_plan_eligible() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let site = base.join("www");
+    fs::create_dir_all(&site).unwrap();
+    create_file(&site.join("index.html"), "<html></html>\n");
+    create_file(&site.join("app.js"), "console.log('hello');\n");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2).unwrap();
+
+    // No child of a live-site dir should be SAFE_CANDIDATE
+    let safe = report.get_examples("SAFE", 100);
+    assert!(
+        !safe.iter().any(|i| i.path.contains("index.html")),
+        "index.html inside www/ must NOT be SAFE_CANDIDATE"
+    );
+    assert!(
+        !safe.iter().any(|i| i.path.contains("app.js")),
+        "app.js inside www/ must NOT be SAFE_CANDIDATE"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 39. Apply still refuses (post parent-risk inheritance)
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_refuses_after_inheritance_pass() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("inherited-plan.json")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Apply is disabled in this safety-first build")
+                .and(predicate::str::contains("Nothing was moved")),
+        );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 40. Inheritance scan is read-only — no file operations
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_inheritance_scan_is_read_only() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+
+    let site = base.join("public_html");
+    fs::create_dir_all(&site).unwrap();
+    create_file(&site.join("index.php"), "<?php ?>\n");
+
+    let app = base.join("ImportantApp");
+    fs::create_dir_all(&app).unwrap();
+    create_file(&app.join(".env"), "KEY=secret\n");
+    create_file(&app.join("config.yml"), "port: 3000\n");
+
+    let before: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let _report = scanner.scan(&base, &base, 3).unwrap();
+
+    let after: std::collections::HashSet<PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "Inheritance-aware scan must not create, move, or delete any files"
+    );
+}

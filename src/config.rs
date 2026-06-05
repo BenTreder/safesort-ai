@@ -62,6 +62,16 @@ pub const SAFE_LOOSE_ZONES: &[&str] = &["Downloads", "Desktop"];
 /// Backup folder patterns.
 pub const BACKUP_PATTERNS: &[&str] = &["backup", "backups", "bak", "old", "archive", "archives"];
 
+/// Live-site folder names whose contents should never be SAFE_CANDIDATE.
+pub const LIVE_SITE_FOLDER_NAMES: &[&str] = &[
+    "public_html",
+    "www",
+    "htdocs",
+    "webroot",
+    "live-site",
+    "live_site",
+];
+
 /// Systemd unit directories.
 pub const SYSTEMD_PATHS: &[&str] = &[
     "/etc/systemd/system",

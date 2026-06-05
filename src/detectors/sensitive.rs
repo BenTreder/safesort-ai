@@ -69,6 +69,24 @@ impl SensitivePathDetector {
         evidence
     }
 
+    /// Check whether a directory contains any sensitive file markers (e.g. .env).
+    /// Used to LOCK parent directories that contain credential files.
+    pub fn detect_sensitive_in_dir(&self, dir: &std::path::Path) -> Vec<Evidence> {
+        let mut evidence = Vec::new();
+        for marker in crate::config::SENSITIVE_FILE_MARKERS {
+            let candidate = dir.join(marker);
+            if candidate.exists() {
+                evidence.push(Evidence {
+                    kind: EvidenceKind::SensitiveFile,
+                    path: candidate.to_string_lossy().to_string(),
+                    description: format!("Contains sensitive file: {marker}"),
+                    note: None,
+                });
+            }
+        }
+        evidence
+    }
+
     /// Detect sensitive directories.
     pub fn detect_dir(&self, item: &ScanItem) -> Vec<Evidence> {
         let mut evidence = Vec::new();

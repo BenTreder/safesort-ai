@@ -38,16 +38,14 @@
 - [x] Comprehensive test suite (23 additional tests)
 - [x] All 121 tests passing (39 unit + 20 integration + 23 placement + 39 lib)
 
-## Phase 2: Dependency Graph — Foundation ⚠️ PARTIAL (see below)
+## Phase 2: Dependency Graph + Impact Visibility ⚠️ IN PROGRESS
 
-## Phase 2: Dependency Graph — Foundation ⚠️ IN PROGRESS (foundation only)
+**Status**: v0.2.2 — impact wired into scan and plan output. Graph types complete.
+`apply` remains disabled. Nothing is moved.
 
-**Status**: Foundation landed in v0.2.1 — graph types, impact analysis, and evidence-based
-classification exist, but no cross-referencing or wiring to `apply`. `apply` remains disabled.
-
-> **Demo fixture path**: `./safesort_demo/`
+> **Demo fixture path**: `./safesort_demo/` (gitignored)
 > **Apply**: still disabled — prints "Nothing was moved."
-> **Safe Autopilot**: plan-only — no moves, no apply.
+> **Safe Autopilot**: plan-only — MEDIUM/HIGH/CRITICAL impact items explicitly excluded.
 > **Workspace Overlay**: preferred pattern for active projects (categorize without touching).
 > **Dependency graph**: explains what *would* break before any future apply ever exists.
 
@@ -56,7 +54,16 @@ classification exist, but no cross-referencing or wiring to `apply`. `apply` rem
 - [x] `analyze_impact_from_evidence` — converts scan evidence to impact level
 - [x] `analyze_project_impact` — .git / Cargo.toml / package.json → Medium+ impact
 - [x] `analyze_sensitive_folder_impact` — .env → Critical impact
-- [x] 11 tests covering project markers (.git, Cargo.toml, package.json, composer.json, pyproject.toml), .env → Critical, systemd → Critical, active projects → Medium+
+- [x] `SystemdDetector::scan_dir` — scan fake-systemd dirs for service bindings
+- [x] `explain` command shows service-bound CRITICAL impact with service name and field
+- [x] `impact_from_evidence()` in `reports/mod.rs` — evidence → impact string
+- [x] `ItemResult.impact_level` on every scan item
+- [x] `SafetySummary` impact counts (Critical/High/Medium/Low/None)
+- [x] Scan terminal output: impact summary block + inline impact per example
+- [x] `PlacementRecommendation.impact_level` + impact icon in plan output
+- [x] Safe Autopilot explicit gate: MEDIUM/HIGH/CRITICAL impact → never auto-plan
+- [x] 147 tests passing (34 safety integration tests)
+- [x] `.gitignore` covers `target/` and `safesort_demo/`
 - [ ] Cross-reference script/Docker/nginx references against scanned paths
 - [ ] Detect Docker volume mounts and bind mounts
 - [ ] Detect Nginx/Apache virtual host document roots

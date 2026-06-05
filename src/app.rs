@@ -372,7 +372,7 @@ fn render_placement_plan(
     println!("  Placement Summary:");
     println!("  ─────────────────────────────────");
     println!("    Total files scanned:    {}", summary.total_files);
-    println!("    🔒 Locked:              {}", summary.locked);
+    println!("    🔒 Locked (Critical):   {}", summary.locked);
 
     if matches!(placement.mode, OrganizationMode::SafeAutopilot) {
         println!("    🟢 Auto-plan eligible:  {}", summary.auto_plan_eligible);
@@ -427,6 +427,14 @@ fn render_placement_plan(
 }
 
 fn render_recommendation(rec: &crate::placement::engine::PlacementRecommendation) {
+    let impact_icon = match rec.impact_level.as_str() {
+        "CRITICAL" => "🔴",
+        "HIGH" => "🟠",
+        "MEDIUM" => "⚠️ ",
+        "LOW" => "🟢",
+        _ => "  ",
+    };
+
     println!("  ┌─────────────────────────────────────────────");
     println!("  │ File:       {}", rec.file_path.display());
 
@@ -439,6 +447,7 @@ fn render_recommendation(rec: &crate::placement::engine::PlacementRecommendation
     println!("  │ Purpose:    {}", rec.purpose.as_str());
     println!("  │ Type:       {}", rec.file_type);
     println!("  │ Risk:       {}", rec.risk);
+    println!("  │ Impact:     {} {}", impact_icon, rec.impact_level);
     println!("  │ Confidence: {}%", rec.confidence.value());
 
     if let Some(ref dest) = rec.destinations.first() {

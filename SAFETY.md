@@ -26,7 +26,31 @@ Before any file could ever be moved, SafeSort AI requires:
 
 ### 3. Dry-Run First
 
-Every operation starts as a dry run. The user sees exactly what *would* happen before anything *does* happen. The `apply` command is disabled in Phase 1.
+Every operation starts as a dry run. The user sees exactly what *would* happen before anything *does* happen. The `apply` command remains disabled.
+
+### 4. Impact Before Action
+
+Every scan now reports an **impact level** derived from evidence:
+
+| Impact | Trigger |
+|---|---|
+| 🔴 **CRITICAL** | `.env`, credentials, systemd references, cron references, live website folders |
+| 🟠 **HIGH** | Symlinks, shell scripts with absolute path references |
+| ⚠️ **MEDIUM** | Active project directories (`.git`, `Cargo.toml`, `package.json`, etc.) |
+| 🟢 **LOW** | Loose media, documents, archives in Downloads/Desktop |
+| ✅ **NONE** | Items with no dependency signals |
+
+Safe Autopilot only ever considers items with **NONE** or **LOW** impact for auto-planning. MEDIUM/HIGH/CRITICAL items are always routed to human review.
+
+### 5. Parent-Risk Inheritance
+
+A file cannot be `SAFE_CANDIDATE` if its parent directory is not safe. SafeSort AI applies a second classification pass after scanning:
+
+- **Child of LOCKED directory** → upgraded to `REVIEW` with `HIGH` impact
+- **Child inside a live-site folder** (`public_html/`, `www/`, `htdocs/`, `webroot/`, `live-site/`, `live_site/`) → upgraded to `REVIEW` with `HIGH` impact
+- **Directory containing `.env` or credentials** → upgraded to `LOCKED` (so its children then inherit REVIEW)
+
+This ensures files like `public_html/index.php` or `ImportantApp/config.yml` are never presented as safe to auto-organize.
 
 ## Classification System
 

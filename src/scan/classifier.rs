@@ -75,12 +75,23 @@ impl Classifier {
             max_level = SafetyLevel::Locked;
         }
 
-        // 3. Sensitive files
+        // 3. Sensitive files (file itself is a sensitive marker)
         let mut sen_file_ev = self.sensitive_detector.detect_file(item);
         if !sen_file_ev.is_empty() {
             evidence.append(&mut sen_file_ev);
             risk = risk.at_least(0.95);
             max_level = SafetyLevel::Locked;
+        }
+
+        // 3b. For directories: check whether they contain sensitive files (.env etc.)
+        //     A folder that hosts a credential file should be LOCKED, not REVIEW.
+        if item.is_dir {
+            let mut dir_sensitive_ev = self.sensitive_detector.detect_sensitive_in_dir(&item.path);
+            if !dir_sensitive_ev.is_empty() {
+                evidence.append(&mut dir_sensitive_ev);
+                risk = risk.at_least(0.95);
+                max_level = SafetyLevel::Locked;
+            }
         }
 
         // 4. Symlinks

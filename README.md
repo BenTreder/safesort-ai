@@ -45,7 +45,7 @@ Creates a question queue for uncertain files (80–94% confidence). Asks where q
 ```bash
 safesort plan --path ~/Downloads --mode safe-autopilot
 ```
-Only auto-plans files with ≥95% confidence (GREEN). Never moves LOCKED or REVIEW items. Only uses safe staging destinations. Produces a plan only — apply is disabled.
+Only auto-plans files with ≥95% confidence (GREEN) **and NONE/LOW impact**. Never auto-plans items with MEDIUM, HIGH, or CRITICAL impact. Never moves LOCKED or REVIEW items. Only uses safe staging destinations. Produces a plan only — apply is disabled.
 
 ### Locked-Down Mode
 ```bash
@@ -64,6 +64,21 @@ Extra conservative. Caps confidence at 80. Never recommends automatic movement. 
 - Touch real user files except to create the Rust project itself
 
 The `apply` command exists as a stub that refuses to run.
+
+### Impact Visibility
+
+Every scan now reports an **impact level** per item and a summary count:
+
+```
+  Impact summary:
+    🔴     CRITICAL      10   ← .env, credentials, systemd refs
+    🟠         HIGH       1   ← symlinks, script path refs
+    ⚠️        MEDIUM       4   ← active projects (.git, Cargo.toml…)
+    🟢          LOW      19   ← loose media, docs, archives
+    ✅         NONE      11   ← no dependency signals
+```
+
+Safe Autopilot only ever auto-plans **NONE/LOW** impact items.
 
 ### Safety-First Design
 

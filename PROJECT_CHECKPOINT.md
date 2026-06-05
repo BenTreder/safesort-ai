@@ -1,20 +1,48 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (safety audit)
-**Version**: 0.2.1
-**Phase**: 1+ complete + Phase 2 dependency graph foundation
+**Date**: 2026-06-05 (Phase 2 stabilization — parent-risk inheritance)
+**Version**: 0.2.3
+**Phase**: 2 in progress — impact now wired into scan and plan output
 
 ## Safety Audit Summary (2026-06-05)
 
-- **133 tests passing** (51 lib + 39 bin + 23 placement + 20 safety)
+- **153 tests passing** (51 lib + 39 bin + 23 placement + 40 safety)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
 - **No destructive filesystem calls** anywhere in src/ (verified by grep)
-- **Demo fixture path**: `./safesort_demo/`
+- **Demo fixture path**: `./safesort_demo/` (gitignored)
 - **Workspace Overlay**: preferred for active projects
 
-### Phase 2 dependency graph (foundation landed)
+### Phase 2 stabilization: impact visibility (landed 2026-06-05)
+
+Impact level is now derived from evidence and surfaced throughout the tool:
+
+| Component | Status |
+|---|---|
+| `impact_from_evidence()` in `reports/mod.rs` | ✅ |
+| `ItemResult.impact_level` field on every scan item | ✅ |
+| `SafetySummary` impact counts (Critical/High/Medium/Low/None) | ✅ |
+| Terminal scan output — impact summary block | ✅ |
+| Terminal scan output — impact inline per example | ✅ |
+| `PlacementRecommendation.impact_level` field | ✅ |
+| Plan output — impact icon + level per recommendation | ✅ |
+| Safe Autopilot explicit impact gate (MEDIUM+ excluded) | ✅ |
+| Fake-systemd `scan_dir` for explain command | ✅ |
+| 7 new impact-focused tests | ✅ |
+| `.gitignore` ignores `target/` and `safesort_demo/` | ✅ |
+| **Parent-risk inheritance (v0.2.3)** | |
+| `EvidenceKind::InheritedRisk` | ✅ |
+| `LIVE_SITE_FOLDER_NAMES` in config | ✅ |
+| `detect_sensitive_in_dir` — dirs containing .env → LOCKED | ✅ |
+| Second-pass inheritance in `Scanner::scan` | ✅ |
+| `public_html/index.php` → REVIEW/HIGH (was SAFE) | ✅ |
+| `ImportantApp/config.yml` → REVIEW/HIGH (was SAFE) | ✅ |
+| 6 new inheritance tests (total 153 passing) | ✅ |
+
+**Impact is display-only. The tool remains read-only. Nothing is moved.**
+
+### Phase 2 dependency graph (foundation)
 
 The `src/graph/` module provides:
 
@@ -25,9 +53,9 @@ The `src/graph/` module provides:
 | `analyze_impact_from_evidence` | ✅ |
 | `analyze_project_impact` (.git/Cargo.toml → Medium+) | ✅ |
 | `analyze_sensitive_folder_impact` (.env → Critical) | ✅ |
-| 11 impact analysis tests | ✅ |
-| Cross-reference to scan pipeline | ⬜ Phase 2 continued |
-| Apply wiring | ⬜ Phase 5 |
+| `SystemdDetector::scan_dir` for fake-systemd fixtures | ✅ |
+| Service-bound impact in `explain` command | ✅ |
+| Cross-reference to apply pipeline | ⬜ Phase 5 |
 
 **The dependency graph explains what would break — it does not move anything.**
 

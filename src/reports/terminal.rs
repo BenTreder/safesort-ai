@@ -52,6 +52,36 @@ pub fn render(report: &ScanReport) -> String {
         format_args!("    {:>18}  {:>6}\n\n", "TOTAL", report.summary.total),
     );
 
+    // Impact summary
+    w(&mut out, format_args!("  Impact summary:\n\n"));
+    w(
+        &mut out,
+        format_args!(
+            "    🔴 {:>12}  {:>6}\n",
+            "CRITICAL", report.summary.impact_critical
+        ),
+    );
+    w(
+        &mut out,
+        format_args!("    🟠 {:>12}  {:>6}\n", "HIGH", report.summary.impact_high),
+    );
+    w(
+        &mut out,
+        format_args!(
+            "    ⚠️  {:>12}  {:>6}\n",
+            "MEDIUM", report.summary.impact_medium
+        ),
+    );
+    w(
+        &mut out,
+        format_args!("    🟢 {:>12}  {:>6}\n", "LOW", report.summary.impact_low),
+    );
+    w(
+        &mut out,
+        format_args!("    ✅ {:>12}  {:>6}\n", "NONE", report.summary.impact_none),
+    );
+    w(&mut out, format_args!("\n"));
+
     // Profile
     if let Some(ref profile) = report.profile {
         w(&mut out, format_args!("  Detected profile:\n\n"));
@@ -78,7 +108,7 @@ pub fn render(report: &ScanReport) -> String {
         w(&mut out, format_args!("\n"));
     }
 
-    // Protected examples
+    // Protected examples with impact inline
     w(&mut out, format_args!("  Protected examples:\n\n"));
 
     let levels: &[(&str, &str)] = &[("LOCKED", "🔒"), ("REVIEW", "⚠️ "), ("SAFE", "✅")];
@@ -92,9 +122,23 @@ pub fn render(report: &ScanReport) -> String {
                 .map(|s| s.as_str())
                 .unwrap_or("No specific reason");
 
+            let impact_icon = match item.impact_level.as_str() {
+                "CRITICAL" => "🔴",
+                "HIGH" => "🟠",
+                "MEDIUM" => "⚠️ ",
+                "LOW" => "🟢",
+                _ => "  ",
+            };
+
             w(&mut out, format_args!("    {}  {:<8}\n", icon, level));
             w(&mut out, format_args!("       {}\n", item.path));
-            w(&mut out, format_args!("       Reason: {reason}\n\n"));
+            w(
+                &mut out,
+                format_args!(
+                    "       Impact: {} {}    Reason: {}\n\n",
+                    impact_icon, item.impact_level, reason
+                ),
+            );
         }
     }
 
