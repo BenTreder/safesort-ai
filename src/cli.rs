@@ -44,6 +44,14 @@ pub enum Commands {
         /// Optional output file path
         #[arg(short, long)]
         output: Option<String>,
+
+        /// Maximum traversal depth (default: 2)
+        #[arg(long, default_value = "2")]
+        depth: usize,
+
+        /// Exclude paths matching this name or substring (repeatable)
+        #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
+        exclude: Vec<String>,
     },
 
     /// Generate a smart placement plan with recommendations
@@ -63,6 +71,14 @@ pub enum Commands {
         /// Optional output file path for the plan
         #[arg(short, long)]
         output: Option<String>,
+
+        /// Maximum traversal depth (default: 2)
+        #[arg(long, default_value = "2")]
+        depth: usize,
+
+        /// Exclude paths matching this name or substring (repeatable)
+        #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
+        exclude: Vec<String>,
     },
 
     /// Analyze user profile from a path

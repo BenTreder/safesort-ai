@@ -384,7 +384,7 @@ fn test_sensitive_keyword_becomes_review() {
 
     let home = base.join("home");
     let scanner = safesort_ai::scan::Scanner::new();
-    let report = scanner.scan(&downloads, &home, 2).unwrap();
+    let report = scanner.scan(&downloads, &home, 2, &[]).unwrap();
 
     // The file should be classified as LOCKED due to "credentials"
     let locked = report.get_examples("LOCKED", 100);
