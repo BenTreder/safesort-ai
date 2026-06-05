@@ -3,6 +3,7 @@ use crate::detectors;
 use crate::error::{Result, SafeSortError};
 use crate::manifest::build_plan_manifest;
 use crate::placement::engine::{OrganizationMode, SmartPlacementEngine};
+use crate::preflight;
 use crate::profile::folder_structure;
 use crate::reports;
 use crate::rules_file::RulesFile;
@@ -143,7 +144,20 @@ pub fn run(cli: Cli) -> Result<()> {
             let rules = load_rules(&rule_file)?;
             cmd_explain(&path, rules.as_ref())
         }
-        Commands::Apply { .. } => cmd_apply(),
+        Commands::Preflight { manifest } => {
+            let p = std::path::PathBuf::from(&manifest);
+            if !p.exists() {
+                return Err(SafeSortError::InvalidPath(format!(
+                    "Manifest file does not exist: {manifest}"
+                )));
+            }
+            cmd_preflight(&p)
+        }
+        Commands::Apply {
+            manifest,
+            confirm,
+            i_understand,
+        } => cmd_apply(manifest.as_deref(), confirm, i_understand),
     }
 }
 
@@ -975,14 +989,67 @@ fn cmd_manifest(
     Ok(())
 }
 
+// ─── Preflight ─────────────────────────────────────────────────────
+
+fn cmd_preflight(manifest_path: &std::path::PathBuf) -> Result<()> {
+    let report = preflight::run_preflight(manifest_path)?;
+    print!("{}", report.render());
+    if report.all_passed {
+        Ok(())
+    } else {
+        Err(SafeSortError::InvalidPath(
+            "Preflight failed — see report above".to_string(),
+        ))
+    }
+}
+
 // ─── Apply ─────────────────────────────────────────────────────────
 
-fn cmd_apply() -> Result<()> {
+fn cmd_apply(manifest: Option<&str>, confirm: bool, i_understand: bool) -> Result<()> {
     println!();
-    println!("  ╔═══════════════════════════════════════════════════╗");
-    println!("  ║  Apply is disabled in this safety-first build.   ║");
-    println!("  ║  Nothing was moved.                              ║");
-    println!("  ╚═══════════════════════════════════════════════════╝");
+
+    // Require both flags.
+    if !confirm || !i_understand {
+        println!("  ╔═══════════════════════════════════════════════════════════════╗");
+        println!("  ║  Apply requires both flags to proceed:                       ║");
+        println!("  ║    --confirm                                                 ║");
+        println!("  ║    --i-understand-this-moves-files                           ║");
+        println!("  ║                                                              ║");
+        println!("  ║  Nothing was moved.                                          ║");
+        println!("  ╚═══════════════════════════════════════════════════════════════╝");
+        println!();
+        return Ok(());
+    }
+
+    // Both flags present — run preflight, then refuse to move.
+    if let Some(manifest_path) = manifest {
+        let p = std::path::PathBuf::from(manifest_path);
+        if p.exists() {
+            println!("  Running apply preflight on: {manifest_path}");
+            println!();
+            match preflight::run_preflight(&p) {
+                Ok(report) => {
+                    print!("{}", report.render());
+                    if report.all_passed {
+                        println!("  Apply preflight PASSED — all safety gates would pass.");
+                    } else {
+                        println!("  Apply preflight FAILED — cannot proceed.");
+                    }
+                }
+                Err(e) => {
+                    println!("  Preflight error: {e}");
+                }
+            }
+            println!();
+        }
+    }
+
+    println!("  ╔═══════════════════════════════════════════════════════════════╗");
+    println!("  ║  Apply preflight passed, but real file movement is still     ║");
+    println!("  ║  disabled in this MVP build.                                 ║");
+    println!("  ║                                                              ║");
+    println!("  ║  Nothing was moved.                                          ║");
+    println!("  ╚═══════════════════════════════════════════════════════════════╝");
     println!();
     Ok(())
 }

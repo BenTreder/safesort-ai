@@ -300,8 +300,37 @@ safesort explain ./safesort_demo/ImportantApp
 safesort explain ./safesort_demo/ImportantApp --rule-file ./examples/safesort-rules.toml
 ```
 
+### `safesort preflight`
+Validate a manifest before any future apply step. Never moves anything.
+
+```bash
+safesort preflight manifest.json
+safesort preflight safesort-demo-manifest.json
+```
+
+Preflight checks (all must pass):
+- Manifest loads as valid JSON
+- `dry_run_only` is `true`
+- No LOCKED entries
+- No MEDIUM/HIGH/CRITICAL impact entries
+- All source files still exist on disk
+- All SHA-256 checksums still match (file unchanged since planning)
+- All file sizes still match
+- All planned destinations are safe (no system paths, no live-site paths)
+
 ### `safesort apply`
-**DISABLED in this safety-first build.**
+**Disabled in this safety-first MVP build — real file movement is intentionally not implemented.**
+
+`apply` requires both acknowledgement flags, runs preflight internally, then refuses with:
+> "Apply preflight passed, but real file movement is still disabled in this MVP build."
+
+```bash
+# Refuses without both flags:
+safesort apply manifest.json
+
+# Runs preflight then refuses (nothing moved):
+safesort apply manifest.json --confirm --i-understand-this-moves-files
+```
 
 ## Examples
 

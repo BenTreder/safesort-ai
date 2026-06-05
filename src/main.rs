@@ -7,6 +7,7 @@ mod detectors;
 mod error;
 mod manifest;
 mod placement;
+mod preflight;
 mod profile;
 mod reports;
 mod rules_file;

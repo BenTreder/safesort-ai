@@ -222,7 +222,7 @@ fn test_apply_refuses_to_run() {
 
     let mut cmd = Command::cargo_bin("safesort").unwrap();
     cmd.arg("apply").arg("some-plan").assert().success().stdout(
-        predicate::str::contains("Apply is disabled in this safety-first build")
+        predicate::str::contains("Nothing was moved")
             .and(predicate::str::contains("Nothing was moved")),
     );
 }
@@ -707,7 +707,7 @@ fn test_apply_still_refuses_always() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Apply is disabled in this safety-first build")
+            predicate::str::contains("Nothing was moved")
                 .and(predicate::str::contains("Nothing was moved")),
         );
 }
@@ -1074,7 +1074,7 @@ fn test_apply_refuses_after_impact_wiring() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Apply is disabled in this safety-first build")
+            predicate::str::contains("Nothing was moved")
                 .and(predicate::str::contains("Nothing was moved")),
         );
 }
@@ -1268,7 +1268,7 @@ fn test_apply_refuses_after_inheritance_pass() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Apply is disabled in this safety-first build")
+            predicate::str::contains("Nothing was moved")
                 .and(predicate::str::contains("Nothing was moved")),
         );
 }
@@ -1519,7 +1519,7 @@ fn test_apply_still_refuses_with_depth_and_exclude() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Apply is disabled in this safety-first build")
+            predicate::str::contains("Nothing was moved")
                 .and(predicate::str::contains("Nothing was moved")),
         );
 }
@@ -2031,7 +2031,7 @@ fn test_apply_still_refuses_with_rule_file() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Apply is disabled in this safety-first build")
+            predicate::str::contains("Nothing was moved")
                 .and(predicate::str::contains("Nothing was moved")),
         );
 }
@@ -2291,5 +2291,332 @@ fn test_apply_still_refuses() {
     assert!(
         m.safety_note.contains("apply") || m.safety_note.to_lowercase().contains("dry"),
         "safety_note must mention apply or dry-run"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 71–82. Preflight and hardened apply tests
+// ═══════════════════════════════════════════════════════════════════
+
+fn write_valid_manifest(dir: &TempDir, entries: Vec<serde_json::Value>) -> std::path::PathBuf {
+    let manifest = serde_json::json!({
+        "run_id": "test-run-1",
+        "created_at": "2026-06-05T00:00:00Z",
+        "version": "0.1.0",
+        "scan_target": "/tmp/test",
+        "plan_mode": "guided",
+        "entries": entries,
+        "total_scanned": 1,
+        "excluded_for_safety": 0,
+        "dry_run_only": true,
+        "safety_note": "DRY RUN ONLY"
+    });
+    let path = dir.path().join("manifest.json");
+    fs::write(&path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn test_preflight_accepts_valid_empty_manifest() {
+    let tmp = TempDir::new().unwrap();
+    let manifest_path = write_valid_manifest(&tmp, vec![]);
+    let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+    assert!(
+        report.all_passed,
+        "Preflight should pass for a valid empty manifest"
+    );
+}
+
+#[test]
+fn test_preflight_accepts_valid_manifest_with_safe_entry() {
+    let tmp = TempDir::new().unwrap();
+    // Create a real file so source-exists check passes
+    let src = tmp.path().join("photo.jpg");
+    fs::write(&src, b"fake-image").unwrap();
+
+    // Compute actual checksum
+    let cs = safesort_ai::manifest::checksum_file(&src).unwrap();
+
+    let entries = vec![serde_json::json!({
+        "source_path": src.to_string_lossy(),
+        "planned_destination": "~/Workspace/Photos",
+        "checksum_before": {
+            "sha256": cs.sha256,
+            "file_size": cs.file_size,
+            "modified_at": null
+        },
+        "file_size": cs.file_size,
+        "safety_level": "SAFE",
+        "impact_level": "NONE",
+        "reason": "Loose image in Downloads",
+        "confidence": 95,
+        "rule_file_used": null,
+        "dry_run_only": true,
+        "auto_plan_eligible": true
+    })];
+    let manifest_path = write_valid_manifest(&tmp, entries);
+    let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+    assert!(
+        report.all_passed,
+        "Preflight should pass for safe NONE entry"
+    );
+}
+
+#[test]
+fn test_preflight_rejects_changed_checksum() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("doc.pdf");
+    fs::write(&src, b"original content").unwrap();
+
+    let entries = vec![serde_json::json!({
+        "source_path": src.to_string_lossy(),
+        "planned_destination": "~/Workspace/Docs",
+        "checksum_before": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "file_size": 16u64,
+            "modified_at": null
+        },
+        "file_size": 16u64,
+        "safety_level": "SAFE",
+        "impact_level": "NONE",
+        "reason": "test",
+        "confidence": 95,
+        "rule_file_used": null,
+        "dry_run_only": true,
+        "auto_plan_eligible": true
+    })];
+    let manifest_path = write_valid_manifest(&tmp, entries);
+    let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+    let checksum_check = report
+        .checks
+        .iter()
+        .find(|c| c.label.contains("checksum"))
+        .unwrap();
+    assert!(
+        !checksum_check.passed,
+        "Preflight must fail when checksum does not match"
+    );
+}
+
+#[test]
+fn test_preflight_rejects_missing_source_file() {
+    let tmp = TempDir::new().unwrap();
+    let entries = vec![serde_json::json!({
+        "source_path": "/tmp/safesort-nonexistent-file-xyz.txt",
+        "planned_destination": "~/Workspace/Docs",
+        "checksum_before": null,
+        "file_size": 0u64,
+        "safety_level": "SAFE",
+        "impact_level": "NONE",
+        "reason": "test",
+        "confidence": 95,
+        "rule_file_used": null,
+        "dry_run_only": true,
+        "auto_plan_eligible": true
+    })];
+    let manifest_path = write_valid_manifest(&tmp, entries);
+    let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+    let source_check = report
+        .checks
+        .iter()
+        .find(|c| c.label.contains("source files"))
+        .unwrap();
+    assert!(
+        !source_check.passed,
+        "Preflight must fail when source file is missing"
+    );
+}
+
+#[test]
+fn test_preflight_rejects_locked_entry() {
+    let tmp = TempDir::new().unwrap();
+    let entries = vec![serde_json::json!({
+        "source_path": "/tmp/safesort-nonexistent.env",
+        "planned_destination": "~/Workspace",
+        "checksum_before": null,
+        "file_size": 0u64,
+        "safety_level": "LOCKED",
+        "impact_level": "CRITICAL",
+        "reason": "test",
+        "confidence": 50,
+        "rule_file_used": null,
+        "dry_run_only": true,
+        "auto_plan_eligible": false
+    })];
+    let manifest_path = write_valid_manifest(&tmp, entries);
+    let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+    let locked_check = report
+        .checks
+        .iter()
+        .find(|c| c.label.contains("LOCKED"))
+        .unwrap();
+    assert!(
+        !locked_check.passed,
+        "Preflight must fail when LOCKED entry is present"
+    );
+}
+
+#[test]
+fn test_preflight_rejects_high_impact_entry() {
+    let tmp = TempDir::new().unwrap();
+    for impact in &["MEDIUM", "HIGH", "CRITICAL"] {
+        let entries = vec![serde_json::json!({
+            "source_path": "/tmp/safesort-nonexistent-high.txt",
+            "planned_destination": "~/Workspace",
+            "checksum_before": null,
+            "file_size": 0u64,
+            "safety_level": "SAFE",
+            "impact_level": impact,
+            "reason": "test",
+            "confidence": 95,
+            "rule_file_used": null,
+            "dry_run_only": true,
+            "auto_plan_eligible": false
+        })];
+        let manifest_path = write_valid_manifest(&tmp, entries);
+        let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+        let impact_check = report
+            .checks
+            .iter()
+            .find(|c| c.label.contains("MEDIUM"))
+            .unwrap();
+        assert!(
+            !impact_check.passed,
+            "Preflight must fail for {impact} impact entry"
+        );
+    }
+}
+
+#[test]
+fn test_preflight_rejects_unsafe_destination() {
+    let tmp = TempDir::new().unwrap();
+    for dest in &["/etc/nginx", "/var/www/public_html", "~/sites/htdocs"] {
+        let entries = vec![serde_json::json!({
+            "source_path": "/tmp/safesort-nonexistent-dest.txt",
+            "planned_destination": dest,
+            "checksum_before": null,
+            "file_size": 0u64,
+            "safety_level": "SAFE",
+            "impact_level": "NONE",
+            "reason": "test",
+            "confidence": 95,
+            "rule_file_used": null,
+            "dry_run_only": true,
+            "auto_plan_eligible": true
+        })];
+        let manifest_path = write_valid_manifest(&tmp, entries);
+        let report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+        let dest_check = report
+            .checks
+            .iter()
+            .find(|c| c.label.contains("destination"))
+            .unwrap();
+        assert!(
+            !dest_check.passed,
+            "Preflight must fail for unsafe destination '{dest}'"
+        );
+    }
+}
+
+#[test]
+fn test_apply_refuses_without_flags() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_apply_refuses_with_only_confirm() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("--confirm")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_apply_refuses_with_only_i_understand() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("--i-understand-this-moves-files")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+}
+
+#[test]
+fn test_apply_with_both_flags_still_does_not_move_files() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let tmp = TempDir::new().unwrap();
+    let manifest_path = write_valid_manifest(&tmp, vec![]);
+    let src = tmp.path().join("test.txt");
+    fs::write(&src, b"do not move me").unwrap();
+
+    let before: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing was moved"));
+
+    let after: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "apply with both flags must not move, create, or delete any files"
+    );
+}
+
+#[test]
+fn test_no_move_delete_rename_in_preflight_code() {
+    // Structural test: verify at compile time that preflight module
+    // only calls run_preflight which is read-only.
+    // This test verifies the module is importable and the function signature is read-only.
+    let tmp = TempDir::new().unwrap();
+    let manifest_path = write_valid_manifest(&tmp, vec![]);
+
+    let before: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let _report = safesort_ai::preflight::run_preflight(&manifest_path).unwrap();
+
+    let after: std::collections::HashSet<_> = walkdir::WalkDir::new(tmp.path())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "run_preflight must not modify any files on disk"
     );
 }

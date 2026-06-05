@@ -159,6 +159,32 @@ If permission is denied, skips safely and reports the skip.
 ### 7. ArchiveDetector
 Detects archive files (`.zip`, `.tar`, `.tar.gz`, `.tgz`, `.bak`, `.old`) and backup folders. Archives in safe zones (Downloads/Desktop) are SAFE_CANDIDATE. Archives inside projects are REVIEW.
 
+## Apply Preflight (Phase 3 — Implemented)
+
+SafeSort AI includes a `preflight` command that validates every safety gate before any hypothetical apply step. Preflight **never moves, copies, renames, or deletes any file**.
+
+### Preflight checks (all must pass before any future apply):
+1. Manifest loads as valid JSON
+2. `dry_run_only = true`
+3. No LOCKED entries in the manifest
+4. No MEDIUM/HIGH/CRITICAL impact entries
+5. All source files still exist on disk
+6. All SHA-256 checksums still match (file unchanged since planning)
+7. All file sizes still match
+8. All planned destinations are safe (no system paths, live-site paths, `/www/`, `/etc/`, etc.)
+
+### Why preflight before apply?
+This pattern ensures that by the time apply is ever enabled:
+- The filesystem state matches the plan (no surprise changes)
+- No safety gate has been bypassed
+- The checksum infrastructure is proven and tested before it matters
+
+### Hardened apply (MVP — still disabled):
+Even when both `--confirm` and `--i-understand-this-moves-files` are provided, apply runs preflight internally, then refuses with:
+> "Apply preflight passed, but real file movement is still disabled in this MVP build."
+
+This means apply is demonstrably safe: it has all the gates, it just refuses to pull the trigger.
+
 ## Rollback Manifest (Phase 3 — Implemented)
 
 SafeSort AI now generates a **dry-run rollback manifest** with SHA-256 checksums. The manifest is created before any hypothetical move and contains everything a future apply step would need to verify the operation is safe.
@@ -259,8 +285,10 @@ In this Phase 1+ / Phase 2 foundation build:
 | Direct live-site moves | 🔒 Always disabled |
 | SHA-256 checksum engine | ✅ Enabled (read-only) |
 | Rollback manifest (dry-run) | ✅ Enabled — `safesort manifest` / `--manifest-output` |
+| `safesort preflight <MANIFEST>` | ✅ Enabled — validates all safety gates, moves nothing |
+| Hardened apply stub | ✅ Enabled — requires both flags, runs preflight, then refuses |
 | Rollback manifest apply | 🔒 Phase 4 — apply disabled |
-| Checksum verification on apply | 🔒 Phase 4 |
+| Checksum verification on apply | ✅ Implemented in preflight (Phase 3) |
 | AI summary integration | 🔒 Phase 6 |
 | Tauri desktop GUI | 🔒 Phase 7 |
 

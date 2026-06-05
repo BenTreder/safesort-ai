@@ -9,6 +9,7 @@ pub mod error;
 pub mod graph;
 pub mod manifest;
 pub mod placement;
+pub mod preflight;
 pub mod profile;
 pub mod reports;
 pub mod rules_file;

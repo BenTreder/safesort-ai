@@ -137,10 +137,27 @@ pub enum Commands {
         rule_file: Option<String>,
     },
 
+    /// Validate a manifest before any future apply (moves nothing)
+    Preflight {
+        /// Path to the manifest JSON file produced by `safesort manifest` or `safesort plan --manifest-output`
+        manifest: String,
+    },
+
     /// Apply a plan (DISABLED in this safety-first build)
+    ///
+    /// Even with all flags present, apply will not move files in this MVP build.
+    /// Use `safesort preflight <MANIFEST>` to validate a manifest safely.
     Apply {
-        /// Path to the plan file (ignored)
-        _plan: Option<String>,
+        /// Path to the manifest JSON file (required)
+        manifest: Option<String>,
+
+        /// First required acknowledgement flag
+        #[arg(long)]
+        confirm: bool,
+
+        /// Second required acknowledgement flag
+        #[arg(long = "i-understand-this-moves-files")]
+        i_understand: bool,
     },
 }
 

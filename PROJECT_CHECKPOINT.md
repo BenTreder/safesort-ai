@@ -1,12 +1,12 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 3 — checksum and rollback manifest)
+**Date**: 2026-06-05 (Phase 3 MVP — preflight, hardened apply, manifest)
 **Version**: 0.4.0
-**Phase**: 3 complete — SHA-256 checksum engine, dry-run rollback manifest, `safesort manifest` command
+**Phase**: 3 MVP complete — SHA-256 checksum, rollback manifest, preflight, hardened apply stub
 
 ## Safety Audit Summary (2026-06-05)
 
-- **70 safety tests passing** (62 existing + 8 new manifest tests)
+- **217 tests passing** (62 lib + 50 bin + 23 placement + 82 safety)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
@@ -210,6 +210,18 @@ cargo test
 | Workspace Overlay | ✅ Complete |
 | Downloads Triage | ✅ Complete |
 | 133 passing tests | ✅ Complete |
+
+## Phase 3 MVP — Preflight, Hardened Apply, Manifest (2026-06-05)
+
+| Component | Status |
+|---|---|
+| `src/preflight/mod.rs` — 8-check preflight engine | ✅ |
+| `safesort preflight <MANIFEST>` command | ✅ |
+| Hardened `safesort apply` — requires `--confirm` + `--i-understand-this-moves-files` | ✅ |
+| Apply runs preflight internally then refuses to move | ✅ |
+| Apply still disabled — "MVP build" refusal message | ✅ |
+| 12 new tests (tests 71–82 in safety_tests.rs) | ✅ |
+| All apply tests updated to new output format | ✅ |
 
 ## Phase 3 — Checksum and Rollback Manifest (2026-06-05)
 

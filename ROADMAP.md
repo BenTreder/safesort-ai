@@ -115,43 +115,50 @@
 - [ ] Detect Git remote URLs pointing to local paths
 - [ ] Impact analysis: "Moving X would break Y, Z"
 
-## Phase 3: Plan Generation
+## Phase 3: Plan Generation + Manifest + Preflight ✅ COMPLETE (MVP)
 
-**Status**: Planned
+**Status**: Implemented in v0.4.0 — MVP complete.
+`apply` still disabled. Nothing is moved.
 
-- [ ] Generate a detailed move plan (JSON format)
-- [ ] Show exactly what would move where
-- [ ] Show what would NOT move and why
-- [ ] Show what needs human review
-- [ ] Interactive plan review (step through each item)
-- [ ] Plan validation (check for conflicts before showing)
-- [ ] Workspace Overlay mapping (categorize without moving)
-- [ ] Export plan as JSON for later apply
+- [x] `safesort manifest --path <PATH> [--output <FILE>]` command
+- [x] `safesort plan --manifest-output <FILE>` option
+- [x] SHA-256 checksums for all SAFE_CANDIDATE files (via `sha2` crate)
+- [x] `ManifestEntry` with `dry_run_only: true` (hardcoded, cannot be false)
+- [x] `RollbackManifest` with `dry_run_only: true` (hardcoded, cannot be false)
+- [x] LOCKED and REVIEW items excluded from manifest entries
+- [x] MEDIUM/HIGH/CRITICAL impact items excluded from manifest entries
+- [x] `excluded_for_safety` counter tracks all excluded items
+- [x] `safesort preflight <MANIFEST>` — 8-check preflight engine (moves nothing)
+- [x] Preflight checks: JSON validity, dry_run_only, no LOCKED, no high-impact, source exists, checksum match, size match, safe destination
+- [x] Hardened `apply` requires both `--confirm` and `--i-understand-this-moves-files`
+- [x] Apply runs preflight internally, then refuses with "still disabled in MVP"
+- [x] 217 tests passing (82 in safety_tests.rs, 12 new preflight tests)
 
-## Phase 4: Checksum and Rollback Manifest
+## Phase 4: Checksum and Rollback Manifest (Advanced)
 
-**Status**: Planned
+**Status**: Partially implemented — manifest generation and preflight done.
+Remaining items for full apply:
 
-- [ ] SHA-256 checksums before any move
-- [ ] JSON manifest with source → destination mapping
-- [ ] Atomic filesystem moves
-- [ ] Post-move checksum verification
+- [x] SHA-256 checksums (implemented in Phase 3)
+- [x] JSON manifest with source → destination mapping (implemented in Phase 3)
+- [x] Post-plan checksum verification via preflight (implemented in Phase 3)
+- [ ] Atomic filesystem moves (apply still disabled)
 - [ ] `safesort rollback <manifest>` command
 - [ ] Automatic manifest backup
 - [ ] Manifest signing (detect tampering)
 
 ## Phase 5: Carefully Gated Apply Command
 
-**Status**: Planned
+**Status**: Stub complete. Infrastructure ready. Real moves not yet implemented.
 
-- [ ] Multi-step confirmation for each move batch
-- [ ] Dry-run is always the default
-- [ ] `--yes-i-really-mean-it` flag (with 10-second delay)
+- [x] Both-flag requirement (`--confirm` + `--i-understand-this-moves-files`)
+- [x] Preflight runs before apply even checks flags
+- [x] "Still disabled in MVP" safety refusal
+- [ ] Atomic filesystem moves with immediate rollback on failure
 - [ ] Per-item confirmation mode
 - [ ] Apply with automatic rollback on failure
 - [ ] Progress bar during apply
 - [ ] Post-apply verification scan
-- [ ] Email/Slack notification on completion (optional)
 
 ## Phase 6: AI Summary Integration
 
