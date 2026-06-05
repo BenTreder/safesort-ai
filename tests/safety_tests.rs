@@ -2881,3 +2881,244 @@ fn test_no_destructive_ops_in_src() {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Recommendation Quality Tests (Tests 93–102)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_purpose_detect_job_application() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("JobApplication-2.pdf", Path::new("/tmp"));
+    assert_eq!(
+        p.as_str(),
+        "Job Application",
+        "Expected JobApplication for JobApplication-2.pdf, got {:?}",
+        p
+    );
+}
+
+#[test]
+fn test_purpose_detect_resume() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("BenTreder-Resume-2026.pdf", Path::new("/tmp"));
+    assert_eq!(p.as_str(), "Resume");
+}
+
+#[test]
+fn test_purpose_detect_nfc_insert() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("quicktapid-nfc-insert-v2.pdf", Path::new("/tmp"));
+    assert_eq!(p.as_str(), "NFC Insert");
+}
+
+#[test]
+fn test_purpose_detect_sticker_sheet() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("916hookup_sticker_sheet_final.pdf", Path::new("/tmp"));
+    assert_eq!(p.as_str(), "Sticker Sheet");
+}
+
+#[test]
+fn test_purpose_detect_mailer() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("ladybug-honey-mailer-v1.pdf", Path::new("/tmp"));
+    assert_eq!(p.as_str(), "Mailer");
+}
+
+#[test]
+fn test_purpose_detect_soq() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("WaterBoards-SOQ-2026.pdf", Path::new("/tmp"));
+    assert_eq!(p.as_str(), "Statement of Qualifications");
+}
+
+#[test]
+fn test_purpose_detect_cannabis_image() {
+    use safesort_ai::placement::file_purpose::FilePurposeDetector;
+    use std::path::Path;
+    let det = FilePurposeDetector::new();
+    let p = det.detect("product-cannabis-photo.jpg", Path::new("/tmp"));
+    assert!(
+        p.as_str().to_lowercase().contains("cannabis"),
+        "Expected cannabis in purpose, got {}",
+        p.as_str()
+    );
+}
+
+#[test]
+fn test_destination_job_application() {
+    use safesort_ai::placement::destination::DestinationPlanner;
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use std::path::PathBuf;
+    let planner = DestinationPlanner::new(PathBuf::from("/home/user"));
+    let dests = planner.plan(None, FilePurpose::JobApplication, true);
+    assert!(
+        dests
+            .iter()
+            .any(|d| d.path.to_string_lossy().contains("Job Applications")),
+        "Expected Job Applications destination"
+    );
+}
+
+#[test]
+fn test_destination_sticker_client() {
+    use safesort_ai::placement::destination::DestinationPlanner;
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::ownership::{DetectedOwner, OwnerCategory};
+    use std::path::PathBuf;
+    let planner = DestinationPlanner::new(PathBuf::from("/home/user"));
+    let owner = DetectedOwner {
+        canonical: "916 Hookup".to_string(),
+        display: "916 Hookup".to_string(),
+        category: OwnerCategory::Client,
+    };
+    let dests = planner.plan(Some(&owner), FilePurpose::StickerSheet, true);
+    assert!(
+        dests
+            .iter()
+            .any(|d| d.path.to_string_lossy().contains("Stickers")),
+        "Expected Stickers in destination"
+    );
+    assert!(
+        dests
+            .iter()
+            .any(|d| d.path.to_string_lossy().contains("916 Hookup")),
+        "Expected client name in destination"
+    );
+}
+
+#[test]
+fn test_destination_cannabis_image() {
+    use safesort_ai::placement::destination::DestinationPlanner;
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use std::path::PathBuf;
+    let planner = DestinationPlanner::new(PathBuf::from("/home/user"));
+    let dests = planner.plan(None, FilePurpose::CannabisImage, true);
+    assert!(
+        dests
+            .iter()
+            .any(|d| d.path.to_string_lossy().contains("Cannabis")),
+        "Expected Cannabis in destination"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Destination Routing Refinement Tests (Tests 103–108)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_client_wins_over_brand_in_dual_match() {
+    // quicktapid_ladybughoney_mailer → Ladybug Honey (Client) beats QuickTapID (Brand)
+    use safesort_ai::placement::ownership::OwnerCategory;
+    use safesort_ai::placement::ownership::OwnershipDetector;
+    use std::path::Path;
+    let det = OwnershipDetector::new();
+    let owner = det.detect(
+        "quicktapid_ladybughoney_mailer_4x6_premium_final.pdf",
+        Path::new("/tmp/Downloads"),
+    );
+    assert!(owner.is_some(), "Expected an owner to be detected");
+    let owner = owner.unwrap();
+    assert_eq!(
+        owner.category,
+        OwnerCategory::Client,
+        "Expected Client category (Ladybug Honey), got {:?} ({})",
+        owner.category,
+        owner.canonical
+    );
+    assert_eq!(owner.canonical, "Ladybug Honey");
+}
+
+#[test]
+fn test_ladybughoney_quicktapid_nfc_insert_routes_to_nfc_inserts() {
+    use safesort_ai::placement::destination::DestinationPlanner;
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::ownership::{DetectedOwner, OwnerCategory};
+    use std::path::PathBuf;
+    let planner = DestinationPlanner::new(PathBuf::from("/home/user"));
+    let owner = DetectedOwner {
+        canonical: "Ladybug Honey".to_string(),
+        display: "Ladybug Honey".to_string(),
+        category: OwnerCategory::Client,
+    };
+    let dests = planner.plan(Some(&owner), FilePurpose::NfcInsert, true);
+    let paths: Vec<_> = dests
+        .iter()
+        .map(|d| d.path.to_string_lossy().to_string())
+        .collect();
+    assert!(
+        paths.iter().any(|p| p.contains("NFC Inserts")),
+        "Expected 'NFC Inserts' in destination, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("Ladybug Honey")),
+        "Expected 'Ladybug Honey' in destination, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn test_quicktapid_4x6_routes_to_postcards() {
+    use safesort_ai::placement::destination::DestinationPlanner;
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::ownership::{DetectedOwner, OwnerCategory};
+    use std::path::PathBuf;
+    let planner = DestinationPlanner::new(PathBuf::from("/home/user"));
+    let owner = DetectedOwner {
+        canonical: "QuickTapID".to_string(),
+        display: "QuickTapID".to_string(),
+        category: OwnerCategory::Brand,
+    };
+    let dests = planner.plan(Some(&owner), FilePurpose::Postcard, true);
+    let paths: Vec<_> = dests
+        .iter()
+        .map(|d| d.path.to_string_lossy().to_string())
+        .collect();
+    assert!(
+        paths.iter().any(|p| p.contains("Postcards")),
+        "Expected 'Postcards' in destination, got: {:?}",
+        paths
+    );
+    assert!(
+        paths.iter().any(|p| p.contains("QuickTapID")),
+        "Expected 'QuickTapID' in destination, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn test_waterboards_wins_over_bentreder_for_soq() {
+    // BenTreder_WaterBoards_ITA_SOQ_Normal.pdf → Water Boards (Client) beats BenTreder.com (Website)
+    use safesort_ai::placement::ownership::OwnerCategory;
+    use safesort_ai::placement::ownership::OwnershipDetector;
+    use std::path::Path;
+    let det = OwnershipDetector::new();
+    let owner = det.detect(
+        "BenTreder_WaterBoards_ITA_SOQ_Normal.pdf",
+        Path::new("/tmp/Downloads"),
+    );
+    assert!(owner.is_some(), "Expected an owner to be detected");
+    let owner = owner.unwrap();
+    assert_eq!(
+        owner.category,
+        OwnerCategory::Client,
+        "Expected Client category (Water Boards), got {:?} ({})",
+        owner.category,
+        owner.canonical
+    );
+    assert_eq!(owner.canonical, "Water Boards");
+}

@@ -481,22 +481,60 @@ fn cmd_organize(
         .recommendations
         .iter()
         .filter(|r| !matches!(r.safety_level, crate::scan::risk::SafetyLevel::Locked))
-        .filter(|r| r.confidence.value() >= 70)
-        .take(8)
+        .filter(|r| r.confidence.value() >= 50)
+        .take(20)
         .collect();
 
     if safe_recs.is_empty() {
-        println!("  (no high-confidence safe candidates found)");
+        println!("  (no safe candidates found)");
     } else {
-        println!("  ({} SAFE files can be staged)", safe_recs.len());
+        let stageable = safe_recs
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.safety_level,
+                    crate::scan::risk::SafetyLevel::SafeCandidate
+                )
+            })
+            .count();
+        println!(
+            "  {} stageable files identified (showing up to 20):",
+            stageable
+        );
+        println!();
         for rec in &safe_recs {
             let name = rec
                 .file_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("?");
+            let owner_str = rec
+                .owner
+                .as_ref()
+                .map(|o| o.display.as_str())
+                .unwrap_or("Unknown");
+            let conf = rec.confidence.value();
+            let conf_icon = if conf >= 95 {
+                "🟢"
+            } else if conf >= 80 {
+                "🟡"
+            } else {
+                "⚠️ "
+            };
             if let Some(dest) = rec.destinations.first() {
-                println!("  → {:<30} → {}", name, dest.path.display());
+                println!(
+                    "  {} {conf}%  {:<28}  [{owner_str} / {}]",
+                    conf_icon,
+                    name,
+                    rec.purpose.as_str()
+                );
+                println!("       → {}", dest.path.display());
+            } else {
+                println!(
+                    "  {} {conf}%  {name}  [{owner_str} / {}]",
+                    conf_icon,
+                    rec.purpose.as_str()
+                );
             }
         }
     }

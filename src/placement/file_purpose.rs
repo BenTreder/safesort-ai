@@ -18,6 +18,7 @@ pub enum FilePurpose {
     Invoice,
     Receipt,
     Proposal,
+    Soq,
     Contract,
     Backup,
     ReleaseZip,
@@ -33,6 +34,24 @@ pub enum FilePurpose {
     Spreadsheet,
     Presentation,
     Code,
+    // Print / marketing collateral
+    PrintInsert,
+    NfcInsert,
+    Mailer,
+    Flyer,
+    Postcard,
+    StickerSheet,
+    Sticker,
+    SalesSheet,
+    // Career
+    JobApplication,
+    Resume,
+    CoverLetter,
+    // Books / content
+    BookInterior,
+    BookManuscript,
+    // Media specializations
+    CannabisImage,
     Unknown,
 }
 
@@ -53,6 +72,7 @@ impl FilePurpose {
             Self::Invoice => "Invoice",
             Self::Receipt => "Receipt",
             Self::Proposal => "Proposal",
+            Self::Soq => "Statement of Qualifications",
             Self::Contract => "Contract",
             Self::Backup => "Backup",
             Self::ReleaseZip => "Release Zip",
@@ -68,6 +88,20 @@ impl FilePurpose {
             Self::Spreadsheet => "Spreadsheet",
             Self::Presentation => "Presentation",
             Self::Code => "Code",
+            Self::PrintInsert => "Print Insert",
+            Self::NfcInsert => "NFC Insert",
+            Self::Mailer => "Mailer",
+            Self::Flyer => "Flyer",
+            Self::Postcard => "Postcard",
+            Self::StickerSheet => "Sticker Sheet",
+            Self::Sticker => "Sticker",
+            Self::SalesSheet => "Sales Sheet",
+            Self::JobApplication => "Job Application",
+            Self::Resume => "Resume",
+            Self::CoverLetter => "Cover Letter",
+            Self::BookInterior => "Book Interior",
+            Self::BookManuscript => "Book Manuscript",
+            Self::CannabisImage => "Cannabis / Product Image",
             Self::Unknown => "Unknown",
         }
     }
@@ -83,7 +117,7 @@ impl FilePurpose {
             Self::SocialProof => "Social Proof",
             Self::Report | Self::Audit => "Reports",
             Self::Invoice | Self::Receipt => "Receipts",
-            Self::Proposal => "Proposals",
+            Self::Proposal | Self::Soq => "Proposals",
             Self::Contract => "Contracts",
             Self::Backup => "Backups",
             Self::ReleaseZip => "Release Zips",
@@ -98,6 +132,17 @@ impl FilePurpose {
             Self::Spreadsheet => "Spreadsheets",
             Self::Presentation => "Presentations",
             Self::Code => "Code",
+            Self::PrintInsert | Self::NfcInsert => "Inserts",
+            Self::Mailer => "Mailers",
+            Self::Flyer => "Flyers",
+            Self::Postcard => "Postcards",
+            Self::StickerSheet | Self::Sticker => "Stickers",
+            Self::SalesSheet => "Sales Sheets",
+            Self::JobApplication => "Job Applications",
+            Self::Resume => "Resumes",
+            Self::CoverLetter => "Cover Letters",
+            Self::BookInterior | Self::BookManuscript => "Book Drafts",
+            Self::CannabisImage => "Cannabis",
             Self::Unknown => "Unsorted",
         }
     }
@@ -119,22 +164,65 @@ impl FilePurposeDetector {
             .unwrap_or("")
             .to_lowercase();
 
-        // Check purpose tokens in priority order
+        // Check purpose tokens in priority order (most specific first)
         let purpose_tokens: &[(FilePurpose, &[&str])] = &[
+            // Career documents — checked before generic Document
+            (
+                FilePurpose::JobApplication,
+                &["jobapplication", "jobapp", "application"],
+            ),
+            (
+                FilePurpose::Resume,
+                &["resume", "cv", "curriculum", "vitae"],
+            ),
+            (
+                FilePurpose::CoverLetter,
+                &["coverletter", "cover", "letter"],
+            ),
+            // SOQ / proposals — before generic Proposal/Report
+            (FilePurpose::Soq, &["soq", "qualifications", "ita"]),
+            // Book content — before generic Document
+            (
+                FilePurpose::BookInterior,
+                &["interior", "interior6x9", "interior8x11"],
+            ),
+            (FilePurpose::BookManuscript, &["manuscript", "draft"]),
+            // NFC insert — before generic PrintInsert
+            (FilePurpose::NfcInsert, &["nfc"]),
+            // Print collateral
+            (FilePurpose::PrintInsert, &["insert", "inserts"]),
+            (FilePurpose::Mailer, &["mailer", "mailers"]),
+            (FilePurpose::Flyer, &["flyer", "flyers"]),
+            (
+                FilePurpose::Postcard,
+                &["postcard", "postcards", "4x6", "5x7"],
+            ),
+            (
+                FilePurpose::StickerSheet,
+                &["stickersheet", "sticker_sheet"],
+            ),
+            (FilePurpose::Sticker, &["sticker", "stickers"]),
+            (
+                FilePurpose::SalesSheet,
+                &["salessheet", "sales", "onesheet", "one-sheet"],
+            ),
+            // Cannabis / product images — before generic Image
+            (
+                FilePurpose::CannabisImage,
+                &["weed", "cannabis", "hemp", "dispensary", "thc", "cbd"],
+            ),
+            // Standard purposes
             (FilePurpose::Logo, &["logo", "logotype"]),
             (FilePurpose::Icon, &["icon", "icons"]),
             (FilePurpose::Favicon, &["favicon"]),
             (FilePurpose::Banner, &["banner", "hero", "header"]),
-            (FilePurpose::Cover, &["cover", "thumbnail", "thumb"]),
+            (FilePurpose::Cover, &["thumbnail", "thumb"]),
             (
                 FilePurpose::ErrorScreenshot,
                 &["error", "bug", "issue", "fail", "failed"],
             ),
             (FilePurpose::QaScreenshot, &["qa", "test", "testing"]),
-            (
-                FilePurpose::SocialProof,
-                &["proof", "testimonial", "review"],
-            ),
+            (FilePurpose::SocialProof, &["proof", "testimonial"]),
             (
                 FilePurpose::Screenshot,
                 &["screenshot", "screen", "capture", "snap"],
@@ -150,11 +238,11 @@ impl FilePurposeDetector {
                 FilePurpose::Report,
                 &["report", "summary", "findings", "analysis"],
             ),
-            (FilePurpose::Audit, &["audit", "review", "assessment"]),
+            (FilePurpose::Audit, &["audit", "assessment"]),
             (FilePurpose::Backup, &["backup", "bak"]),
             (FilePurpose::ReleaseZip, &["release", "dist"]),
             (FilePurpose::PluginAsset, &["asset"]),
-            (FilePurpose::WebsiteAsset, &["asset", "web"]),
+            (FilePurpose::WebsiteAsset, &["web"]),
             (
                 FilePurpose::SocialPost,
                 &[
@@ -168,6 +256,25 @@ impl FilePurposeDetector {
             ),
             (FilePurpose::Installer, &["setup", "install", "installer"]),
         ];
+
+        // Also check filename for sticker_sheet pattern (contains underscore)
+        let filename_lower = filename.to_lowercase();
+        if filename_lower.contains("sticker_sheet")
+            || filename_lower.contains("sticker-sheet")
+            || (filename_lower.contains("sticker") && filename_lower.contains("sheet"))
+        {
+            return FilePurpose::StickerSheet;
+        }
+        // Check for book interior patterns like "interior-6x9" or "82p"
+        if (filename_lower.contains("interior")
+            && (filename_lower.contains("6x9")
+                || filename_lower.contains("8x11")
+                || filename_lower.contains("5x8")))
+            || (filename_lower.contains("black-and-white") && filename_lower.contains("p-"))
+            || filename_lower.contains("82p")
+        {
+            return FilePurpose::BookInterior;
+        }
 
         for (purpose, keywords) in purpose_tokens {
             for token in &tokens {

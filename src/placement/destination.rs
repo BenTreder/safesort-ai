@@ -272,6 +272,213 @@ impl DestinationPlanner {
                     DestinationRisk::Safe,
                 ));
             }
+            FilePurpose::JobApplication => {
+                destinations.push(self.make_dest(
+                    "Workspace/06_Business/Career/Job Applications",
+                    "Career → Job Applications",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::Resume => {
+                destinations.push(self.make_dest(
+                    "Workspace/06_Business/Career/Resumes",
+                    "Career → Resumes",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::CoverLetter => {
+                destinations.push(self.make_dest(
+                    "Workspace/06_Business/Career/Cover Letters",
+                    "Career → Cover Letters",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::Soq => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Proposals/SOQ"),
+                        &format!("Client Work → {owner_name} → Proposals → SOQ"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+                destinations.push(self.make_dest(
+                    "Workspace/02_Client Work/Proposals/SOQ",
+                    "Client Work → Proposals → SOQ",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::NfcInsert => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/NFC Inserts"),
+                        &format!("Client Work → {owner_name} → Print Assets → NFC Inserts"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/NFC Inserts"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → NFC Inserts"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::PrintInsert => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Inserts"),
+                        &format!("Client Work → {owner_name} → Print Assets → Inserts"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Inserts"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Inserts"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::Mailer => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Mailers"),
+                        &format!("Client Work → {owner_name} → Print Assets → Mailers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Mailers"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Mailers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::Postcard => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Postcards"),
+                        &format!("Client Work → {owner_name} → Print Assets → Postcards"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Postcards"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Postcards"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::Flyer => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Flyers"
+                        ),
+                        &format!("Client Work → {owner_name} → Print Assets → Flyers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Flyers"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Flyers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::SalesSheet => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Sales Sheets"),
+                        &format!("Client Work → {owner_name} → Print Assets → Sales Sheets"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Sales Sheets"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Sales Sheets"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::StickerSheet | FilePurpose::Sticker => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Deliverables/Print Assets/Stickers"),
+                        &format!("Client Work → {owner_name} → Print Assets → Stickers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Stickers"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Stickers"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::BookInterior | FilePurpose::BookManuscript => {
+                destinations.push(self.make_dest(
+                    &format!("Workspace/06_Business/Books/{owner_name}/Interior Drafts"),
+                    &format!("Books → {owner_name} → Interior Drafts"),
+                    true,
+                    DestinationRisk::Safe,
+                ));
+                destinations.push(self.make_dest(
+                    "Workspace/06_Business/Books/Drafts",
+                    "Books → Drafts",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::CannabisImage => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/02_Client Work/{owner_name}/Deliverables/Product Images"
+                        ),
+                        &format!("Client Work → {owner_name} → Product Images"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+                destinations.push(self.make_dest(
+                    "Workspace/07_Media/Product Images/Cannabis",
+                    "Media → Product Images → Cannabis",
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
             _ => {
                 // Unknown or unhandled purpose → Review Needed
                 destinations.push(self.make_dest(

@@ -68,49 +68,57 @@ impl OwnershipDetector {
     }
 
     /// Detect ownership from a filename and its parent path.
+    ///
+    /// When multiple owners match (e.g. a client name AND a product name both appear),
+    /// the highest-priority category wins: Client > Website > Brand > Plugin > Project > Unknown.
+    /// This ensures deliverable files route to the client, not the product/platform.
     pub fn detect(&self, filename: &str, parent_path: &Path) -> Option<DetectedOwner> {
         let tokens = tokenize(filename);
         let parent_tokens = path_tokens(parent_path);
+        let all_tokens: Vec<String> = tokens.iter().chain(parent_tokens.iter()).cloned().collect();
 
-        // 1. Check filename tokens against aliases (exact match first)
+        let mut candidates: Vec<DetectedOwner> = Vec::new();
+
+        // Collect all single-token matches from filename
         for token in &tokens {
             if let Some(owner) = self.aliases.get(token) {
-                return Some(owner.clone());
+                candidates.push(owner.clone());
             }
         }
 
-        // 2. Check multi-token sequences (2- and 3-token windows)
-        let all_tokens: Vec<String> = tokens.iter().chain(parent_tokens.iter()).cloned().collect();
-
-        // Check 3-token windows first (more specific)
+        // Collect multi-token window matches (3-token first for specificity)
         for window in all_tokens.windows(3) {
             let combined = format!("{} {} {}", window[0], window[1], window[2]);
             if let Some(owner) = self.aliases.get(&combined) {
-                return Some(owner.clone());
+                candidates.push(owner.clone());
             }
         }
-
-        // Check 2-token windows
         for window in all_tokens.windows(2) {
             let combined = format!("{} {}", window[0], window[1]);
             if let Some(owner) = self.aliases.get(&combined) {
-                return Some(owner.clone());
+                candidates.push(owner.clone());
             }
-            // Also try hyphenated
             let hyphenated = format!("{}-{}", window[0], window[1]);
             if let Some(owner) = self.aliases.get(&hyphenated) {
-                return Some(owner.clone());
+                candidates.push(owner.clone());
             }
         }
 
-        // 3. Check parent folder names against aliases
+        // If we found candidates, return highest-priority category.
+        // Priority: Client > Website > Brand > Plugin > Project > Unknown
+        if !candidates.is_empty() {
+            candidates.sort_by_key(|o| category_priority(o.category));
+            return Some(candidates.remove(0));
+        }
+
+        // Check parent folder names
         for token in &parent_tokens {
             if let Some(owner) = self.aliases.get(token) {
                 return Some(owner.clone());
             }
         }
 
-        // 4. Heuristic: if filename has recognizable project-like structure, extract it
+        // Heuristic: capitalized token → Unknown brand
         if let Some(owner) = self.heuristic_detect(&tokens, &parent_tokens) {
             return Some(owner);
         }
@@ -326,6 +334,89 @@ impl OwnershipDetector {
                 "Paper Options",
                 OwnerCategory::Project,
             ),
+            // Ladybug Honey
+            (
+                "ladybughoney",
+                "Ladybug Honey",
+                "Ladybug Honey",
+                OwnerCategory::Client,
+            ),
+            (
+                "ladybug-honey",
+                "Ladybug Honey",
+                "Ladybug Honey",
+                OwnerCategory::Client,
+            ),
+            (
+                "ladybug honey",
+                "Ladybug Honey",
+                "Ladybug Honey",
+                OwnerCategory::Client,
+            ),
+            (
+                "ladybug",
+                "Ladybug Honey",
+                "Ladybug Honey",
+                OwnerCategory::Client,
+            ),
+            // 916 Hookup
+            (
+                "916hookup",
+                "916 Hookup",
+                "916 Hookup",
+                OwnerCategory::Client,
+            ),
+            (
+                "916-hookup",
+                "916 Hookup",
+                "916 Hookup",
+                OwnerCategory::Client,
+            ),
+            (
+                "916 hookup",
+                "916 Hookup",
+                "916 Hookup",
+                OwnerCategory::Client,
+            ),
+            ("916", "916 Hookup", "916 Hookup", OwnerCategory::Client),
+            // Water Boards / WaterBoards
+            (
+                "waterboards",
+                "Water Boards",
+                "Water Boards",
+                OwnerCategory::Client,
+            ),
+            (
+                "water-boards",
+                "Water Boards",
+                "Water Boards",
+                OwnerCategory::Client,
+            ),
+            (
+                "water boards",
+                "Water Boards",
+                "Water Boards",
+                OwnerCategory::Client,
+            ),
+            // Chronic Hacker / ChronicHacker
+            (
+                "chronichacker",
+                "Chronic Hacker",
+                "Chronic Hacker",
+                OwnerCategory::Brand,
+            ),
+            (
+                "chronic-hacker",
+                "Chronic Hacker",
+                "Chronic Hacker",
+                OwnerCategory::Brand,
+            ),
+            (
+                "chronic hacker",
+                "Chronic Hacker",
+                "Chronic Hacker",
+                OwnerCategory::Brand,
+            ),
         ];
 
         for (token, canonical, display, category) in entries {
@@ -338,6 +429,18 @@ impl OwnershipDetector {
                 },
             );
         }
+    }
+}
+
+/// Lower number = higher priority. Used to prefer Client over Brand when both match.
+fn category_priority(cat: OwnerCategory) -> u8 {
+    match cat {
+        OwnerCategory::Client => 0,
+        OwnerCategory::Website => 1,
+        OwnerCategory::Brand => 2,
+        OwnerCategory::Plugin => 3,
+        OwnerCategory::Project => 4,
+        OwnerCategory::Unknown => 5,
     }
 }
 
