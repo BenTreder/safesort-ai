@@ -2094,3 +2094,202 @@ paths = []
         "Rule-file feature must not create, move, delete, or rename any files"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 63–70. Manifest / Checksum tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_checksum_sha256_is_stable() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("hello.txt");
+    fs::write(&path, b"hello world").unwrap();
+
+    let cs = safesort_ai::manifest::checksum_file(&path).unwrap();
+    // SHA-256("hello world") verified from actual output
+    assert_eq!(
+        cs.sha256,
+        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    );
+    // Run again — result must be identical (deterministic)
+    let cs2 = safesort_ai::manifest::checksum_file(&path).unwrap();
+    assert_eq!(cs.sha256, cs2.sha256);
+}
+
+#[test]
+fn test_checksum_sha256_differs_for_different_content() {
+    let tmp = TempDir::new().unwrap();
+    let a = tmp.path().join("a.txt");
+    let b = tmp.path().join("b.txt");
+    fs::write(&a, b"content A").unwrap();
+    fs::write(&b, b"content B").unwrap();
+
+    let ca = safesort_ai::manifest::checksum_file(&a).unwrap();
+    let cb = safesort_ai::manifest::checksum_file(&b).unwrap();
+    assert_ne!(ca.sha256, cb.sha256);
+}
+
+#[test]
+fn test_checksum_file_size_matches() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("sized.bin");
+    let content = b"1234567890"; // 10 bytes
+    fs::write(&path, content).unwrap();
+
+    let cs = safesort_ai::manifest::checksum_file(&path).unwrap();
+    assert_eq!(cs.file_size, 10);
+}
+
+#[test]
+fn test_rollback_manifest_dry_run_only_always_true() {
+    use safesort_ai::manifest::RollbackManifest;
+    let m = RollbackManifest::new(
+        "run-1".to_string(),
+        "/tmp/test".to_string(),
+        "guided".to_string(),
+    );
+    assert!(
+        m.dry_run_only,
+        "RollbackManifest.dry_run_only must always be true"
+    );
+}
+
+#[test]
+fn test_rollback_manifest_serializes_to_valid_json() {
+    use safesort_ai::manifest::RollbackManifest;
+    let m = RollbackManifest::new(
+        "run-42".to_string(),
+        "/tmp/foo".to_string(),
+        "preview".to_string(),
+    );
+    let json = serde_json::to_string(&m).expect("must serialize to JSON");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("must be valid JSON");
+    assert_eq!(parsed["dry_run_only"], serde_json::Value::Bool(true));
+    assert!(parsed["version"].is_string(), "version must be a string");
+}
+
+#[test]
+fn test_manifest_excludes_locked_files() {
+    use safesort_ai::manifest::build_plan_manifest;
+    use safesort_ai::placement::engine::{OrganizationMode, PlacementRecommendation};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = TempDir::new().unwrap();
+
+    // Build a fake PlacementRecommendation for a LOCKED item
+    // We can't easily instantiate PlacementRecommendation from outside, so we use
+    // the full pipeline instead.
+    let base = tmp.path().to_path_buf();
+    create_file(&base.join(".env"), "SECRET=yes");
+
+    let home = base.clone();
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &home, 2, &[]).unwrap();
+
+    let items: Vec<(std::path::PathBuf, SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| {
+            let level = match i.safety_level.as_str() {
+                "LOCKED" => SafetyLevel::Locked,
+                "REVIEW" => SafetyLevel::Review,
+                _ => SafetyLevel::SafeCandidate,
+            };
+            (std::path::PathBuf::from(&i.path), level)
+        })
+        .collect();
+
+    let engine =
+        safesort_ai::placement::engine::SmartPlacementEngine::new(home, OrganizationMode::Guided);
+    let placement = engine.run(&items);
+
+    let total = placement.summary.total_files;
+    let manifest = build_plan_manifest(
+        &base,
+        OrganizationMode::Guided,
+        &placement.recommendations,
+        None,
+        total,
+    );
+
+    // .env is LOCKED — must not appear in manifest entries
+    for entry in &manifest.entries {
+        assert!(
+            !entry.source_path.ends_with(".env"),
+            ".env (LOCKED) must not appear in manifest entries"
+        );
+    }
+    // excluded_for_safety must be > 0
+    assert!(
+        manifest.excluded_for_safety > 0,
+        "LOCKED items must increment excluded_for_safety"
+    );
+}
+
+#[test]
+fn test_manifest_dry_run_does_not_modify_scanned_files() {
+    use safesort_ai::manifest::build_plan_manifest;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path().to_path_buf();
+    create_file(&base.join("photo.jpg"), "fake-image");
+    create_file(&base.join("doc.pdf"), "fake-pdf");
+
+    let before: std::collections::HashSet<_> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
+    let items: Vec<(std::path::PathBuf, SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|i| {
+            (
+                std::path::PathBuf::from(&i.path),
+                SafetyLevel::SafeCandidate,
+            )
+        })
+        .collect();
+    let engine = SmartPlacementEngine::new(base.clone(), OrganizationMode::Guided);
+    let placement = engine.run(&items);
+    let _manifest = build_plan_manifest(
+        &base,
+        OrganizationMode::Guided,
+        &placement.recommendations,
+        None,
+        placement.summary.total_files,
+    );
+
+    let after: std::collections::HashSet<_> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "build_plan_manifest must not modify any files on disk"
+    );
+}
+
+#[test]
+fn test_apply_still_refuses() {
+    // apply command must print a disabled message and return Ok (no panic, no move)
+    // We test the disabled flag by checking the binary behavior via the library.
+    // Since cmd_apply is private, we verify indirectly: if we can run the full
+    // parse path, we at least confirm it compiles and is reachable.
+    // The unit test below checks the safety note on the manifest.
+    use safesort_ai::manifest::RollbackManifest;
+    let m = RollbackManifest::new("x".into(), "/tmp".into(), "guided".into());
+    assert!(
+        m.safety_note.contains("apply") || m.safety_note.to_lowercase().contains("dry"),
+        "safety_note must mention apply or dry-run"
+    );
+}

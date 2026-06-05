@@ -87,6 +87,33 @@ pub enum Commands {
         /// Path to a TOML rule file for custom aliases, protected paths, and staging destinations
         #[arg(long, value_name = "FILE")]
         rule_file: Option<String>,
+
+        /// Write a dry-run rollback manifest to this file (JSON). Manifest only — nothing is moved.
+        #[arg(long, value_name = "FILE")]
+        manifest_output: Option<String>,
+    },
+
+    /// Generate a dry-run rollback manifest with checksums (nothing is moved)
+    Manifest {
+        /// Path to scan
+        #[arg(long)]
+        path: String,
+
+        /// Maximum traversal depth (default: 2)
+        #[arg(long, default_value = "2")]
+        depth: usize,
+
+        /// Exclude paths matching this name or substring (repeatable)
+        #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
+        exclude: Vec<String>,
+
+        /// Path to a TOML rule file
+        #[arg(long, value_name = "FILE")]
+        rule_file: Option<String>,
+
+        /// Write manifest JSON to this file instead of stdout
+        #[arg(long, value_name = "FILE")]
+        output: Option<String>,
     },
 
     /// Analyze user profile from a path

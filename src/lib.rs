@@ -7,6 +7,7 @@ pub mod config;
 pub mod detectors;
 pub mod error;
 pub mod graph;
+pub mod manifest;
 pub mod placement;
 pub mod profile;
 pub mod reports;

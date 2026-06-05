@@ -1,6 +1,7 @@
 use crate::cli::{Cli, Commands, OrgMode, OutputFormat};
 use crate::detectors;
 use crate::error::{Result, SafeSortError};
+use crate::manifest::build_plan_manifest;
 use crate::placement::engine::{OrganizationMode, SmartPlacementEngine};
 use crate::profile::folder_structure;
 use crate::reports;
@@ -96,10 +97,43 @@ pub fn run(cli: Cli) -> Result<()> {
             depth,
             exclude,
             rule_file,
+            manifest_output,
         } => {
             let target = resolve_target(path, home)?;
             let rules = load_rules(&rule_file)?;
-            cmd_plan(&target, mode, output, depth, &exclude, rules.as_ref())
+            cmd_plan(
+                &target,
+                mode,
+                output,
+                depth,
+                &exclude,
+                rules.as_ref(),
+                manifest_output.as_deref(),
+                rule_file.as_deref(),
+            )
+        }
+        Commands::Manifest {
+            path,
+            depth,
+            exclude,
+            rule_file,
+            output,
+        } => {
+            let target = PathBuf::from(&path);
+            if !target.exists() {
+                return Err(SafeSortError::InvalidPath(format!(
+                    "Path does not exist: {path}"
+                )));
+            }
+            let rules = load_rules(&rule_file)?;
+            cmd_manifest(
+                &target,
+                depth,
+                &exclude,
+                rules.as_ref(),
+                output.as_deref(),
+                rule_file.as_deref(),
+            )
         }
         Commands::Profile { path, home } => {
             let target = resolve_target(path, home)?;
@@ -394,6 +428,8 @@ fn cmd_plan(
     depth: usize,
     exclude: &[String],
     rules: Option<&RulesFile>,
+    manifest_output: Option<&str>,
+    rule_file_path: Option<&str>,
 ) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = org_mode(mode);
@@ -461,6 +497,20 @@ fn cmd_plan(
         });
         std::fs::write(&out_path, serde_json::to_string_pretty(&plan_json)?)?;
         println!("  Plan written to: {out_path}");
+    }
+
+    // Write rollback manifest if requested (dry-run only — nothing is moved)
+    if let Some(manifest_path) = manifest_output {
+        let manifest = build_plan_manifest(
+            target,
+            org,
+            &placement.recommendations,
+            rule_file_path,
+            placement.summary.total_files,
+        );
+        let json = serde_json::to_string_pretty(&manifest)?;
+        std::fs::write(manifest_path, &json)?;
+        println!("  Manifest written to: {manifest_path}  (dry_run_only=true — nothing was moved)");
     }
 
     Ok(())
@@ -863,6 +913,64 @@ fn cmd_explain(path: &str, rules: Option<&RulesFile>) -> Result<()> {
     println!();
     println!("  Nothing was moved.");
     println!();
+
+    Ok(())
+}
+
+// ─── Manifest ──────────────────────────────────────────────────────
+
+fn cmd_manifest(
+    target: &PathBuf,
+    depth: usize,
+    exclude: &[String],
+    rules: Option<&RulesFile>,
+    output: Option<&str>,
+    rule_file_path: Option<&str>,
+) -> Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+    let org = OrganizationMode::Guided;
+
+    let scanner = build_scanner(rules);
+    let report = scanner.scan(target, &home, depth, exclude)?;
+
+    let items: Vec<(PathBuf, crate::scan::risk::SafetyLevel)> = report
+        .items
+        .values()
+        .flatten()
+        .map(|item| {
+            let level = match item.safety_level.as_str() {
+                "LOCKED" => crate::scan::risk::SafetyLevel::Locked,
+                "REVIEW" => crate::scan::risk::SafetyLevel::Review,
+                _ => crate::scan::risk::SafetyLevel::SafeCandidate,
+            };
+            (PathBuf::from(&item.path), level)
+        })
+        .collect();
+
+    let engine = SmartPlacementEngine::new(home.clone(), org);
+    let engine = if let Some(r) = rules {
+        engine.with_rules(r)
+    } else {
+        engine
+    };
+    let placement = engine.run(&items);
+
+    let manifest = build_plan_manifest(
+        target,
+        org,
+        &placement.recommendations,
+        rule_file_path,
+        placement.summary.total_files,
+    );
+
+    let json = serde_json::to_string_pretty(&manifest)?;
+
+    if let Some(out_path) = output {
+        std::fs::write(out_path, &json)?;
+        println!("  Manifest written to: {out_path}  (dry_run_only=true — nothing was moved)");
+    } else {
+        println!("{json}");
+    }
 
     Ok(())
 }

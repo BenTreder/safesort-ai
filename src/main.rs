@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod detectors;
 mod error;
+mod manifest;
 mod placement;
 mod profile;
 mod reports;

@@ -268,7 +268,26 @@ safesort plan --path ~/Downloads --output plan.json      # export plan
 # With depth and exclude controls
 safesort plan --path ~/Projects --mode guided --depth 3
 safesort plan --path ~/Sites --mode safe-autopilot --exclude wp-content --exclude node_modules
+
+# Write a dry-run rollback manifest with SHA-256 checksums (nothing is moved)
+safesort plan --path ~/Downloads --mode guided --manifest-output manifest.json
 ```
+
+### `safesort manifest`
+Generate a dry-run rollback manifest with SHA-256 checksums. Nothing is moved.
+
+```bash
+safesort manifest --path ~/Downloads
+safesort manifest --path ~/Downloads --output manifest.json
+safesort manifest --path ~/Projects --depth 3 --exclude node_modules
+safesort manifest --path ~/Downloads --rule-file ./examples/safesort-rules.toml --output manifest.json
+```
+
+The manifest is a JSON document describing what a future apply step *would* do. It contains:
+- SHA-256 checksums for each SAFE_CANDIDATE file (so a future apply can verify nothing changed)
+- `dry_run_only: true` — always set, applies forever
+- Only SAFE_CANDIDATE files with NONE/LOW impact appear as entries; LOCKED and REVIEW items are excluded and counted separately
+- `excluded_for_safety` — count of files excluded from entries due to LOCKED/REVIEW/HIGH+ impact
 
 ### `safesort profile`
 Analyze user profile and recommend folder structure.

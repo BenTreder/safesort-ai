@@ -159,15 +159,30 @@ If permission is denied, skips safely and reports the skip.
 ### 7. ArchiveDetector
 Detects archive files (`.zip`, `.tar`, `.tar.gz`, `.tgz`, `.bak`, `.old`) and backup folders. Archives in safe zones (Downloads/Desktop) are SAFE_CANDIDATE. Archives inside projects are REVIEW.
 
-## Future Rollback Design
+## Rollback Manifest (Phase 3 — Implemented)
 
-In Phase 4, SafeSort AI will implement a checksum and rollback manifest:
+SafeSort AI now generates a **dry-run rollback manifest** with SHA-256 checksums. The manifest is created before any hypothetical move and contains everything a future apply step would need to verify the operation is safe.
 
-1. **Before any move**: Generate SHA-256 checksums of all files being moved
-2. **Create manifest**: A JSON file recording every source → destination mapping
-3. **Atomic moves**: Use filesystem-level move operations
-4. **Verification**: After move, verify checksums match
-5. **Rollback command**: `safesort rollback <manifest>` undoes all moves
+### Manifest safety invariants (always enforced):
+- `dry_run_only: true` is hardcoded in all manifest structs — it cannot be set to false
+- Only SAFE_CANDIDATE files with NONE/LOW impact appear as entries
+- LOCKED and REVIEW files are excluded and counted in `excluded_for_safety`
+- HIGH/MEDIUM/CRITICAL impact items are excluded even if classified as SAFE_CANDIDATE
+- The manifest command writes **only the requested JSON output file** — it never touches scanned files
+- `apply` remains disabled; the manifest is purely informational
+
+### Manifest generation:
+```bash
+safesort manifest --path ~/Downloads --output manifest.json
+safesort plan --path ~/Downloads --mode guided --manifest-output manifest.json
+```
+
+### Future rollback design (Phase 4):
+When apply is eventually enabled, the workflow will be:
+1. **Manifest phase** (current): SHA-256 checksums + planned destinations, nothing moved
+2. **Verify phase**: Confirm checksums still match before applying
+3. **Apply phase**: Atomic moves with full manifest audit trail
+4. **Rollback command**: `safesort rollback <manifest>` undoes all moves
 
 ## The "Workspace Overlay" Concept
 
@@ -242,8 +257,10 @@ In this Phase 1+ / Phase 2 foundation build:
 | File moving | 🔒 Disabled |
 | File deletion | 🔒 Disabled |
 | Direct live-site moves | 🔒 Always disabled |
-| Rollback manifest | 🔒 Phase 4 |
-| Checksum verification | 🔒 Phase 4 |
+| SHA-256 checksum engine | ✅ Enabled (read-only) |
+| Rollback manifest (dry-run) | ✅ Enabled — `safesort manifest` / `--manifest-output` |
+| Rollback manifest apply | 🔒 Phase 4 — apply disabled |
+| Checksum verification on apply | 🔒 Phase 4 |
 | AI summary integration | 🔒 Phase 6 |
 | Tauri desktop GUI | 🔒 Phase 7 |
 

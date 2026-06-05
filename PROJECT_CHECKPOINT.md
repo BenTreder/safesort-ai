@@ -1,12 +1,12 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 2 — read-only custom rule files)
-**Version**: 0.3.0
-**Phase**: 2 in progress — rule files, depth/exclude, impact, and parent-risk inheritance all complete
+**Date**: 2026-06-05 (Phase 3 — checksum and rollback manifest)
+**Version**: 0.4.0
+**Phase**: 3 complete — SHA-256 checksum engine, dry-run rollback manifest, `safesort manifest` command
 
 ## Safety Audit Summary (2026-06-05)
 
-- **183 tests passing** (55 lib + 43 bin + 23 placement + 62 safety)
+- **70 safety tests passing** (62 existing + 8 new manifest tests)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
@@ -211,17 +211,33 @@ cargo test
 | Downloads Triage | ✅ Complete |
 | 133 passing tests | ✅ Complete |
 
+## Phase 3 — Checksum and Rollback Manifest (2026-06-05)
+
+| Component | Status |
+|---|---|
+| `src/manifest/checksum.rs` — SHA-256 via `sha2` crate | ✅ |
+| `src/manifest/rollback.rs` — `ManifestEntry`, `RollbackManifest` | ✅ |
+| `src/manifest/plan_manifest.rs` — `build_plan_manifest()` | ✅ |
+| `src/manifest/mod.rs` — module wiring | ✅ |
+| `safesort manifest --path <PATH> [--output <FILE>]` command | ✅ |
+| `safesort plan --manifest-output <FILE>` option | ✅ |
+| `dry_run_only: true` enforced everywhere in manifest structs | ✅ |
+| Only SAFE_CANDIDATE + NONE/LOW impact in manifest entries | ✅ |
+| LOCKED/REVIEW/HIGH+ impact → `excluded_for_safety` counter | ✅ |
+| 8 new manifest tests (tests 63–70 in safety_tests.rs) | ✅ |
+| `apply` still disabled | ✅ |
+
 ## What Is Intentionally Disabled for Safety
 
 | Feature | Reason |
 |---|---|
-| `apply` command | Phase 5 — needs rollback manifest first |
-| File moving | Phase 5 — needs checksum verification first |
+| `apply` command | Phase 5 — manifest foundation now complete |
+| File moving | Phase 5 — checksum verification ready, apply still disabled |
 | File deletion | Never without explicit consent + backup |
 | Direct live-site moves | Always disabled — staging only |
-| Rules persistence to disk | Phase 3 — needs explicit opt-in flag |
-| Rollback manifest | Phase 4 |
-| Checksum verification | Phase 4 |
+| Rules persistence to disk | Phase 4 — needs explicit opt-in flag |
+| Rollback manifest apply | Phase 5 — manifest generation complete (dry-run only) |
+| Checksum verification on apply | Phase 5 |
 | AI summary integration | Phase 6 |
 | Tauri desktop GUI | Phase 7 |
 
