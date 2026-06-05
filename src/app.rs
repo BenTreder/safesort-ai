@@ -4,10 +4,63 @@ use crate::error::{Result, SafeSortError};
 use crate::placement::engine::{OrganizationMode, SmartPlacementEngine};
 use crate::profile::folder_structure;
 use crate::reports;
+use crate::rules_file::RulesFile;
 use crate::scan::Scanner;
 use std::path::{Path, PathBuf};
 
 const SCAN_DEPTH: usize = 2;
+
+/// Load a rule file if a path was provided. Never auto-loads from home directory.
+fn load_rules(rule_file: &Option<String>) -> Result<Option<RulesFile>> {
+    match rule_file {
+        Some(path) => {
+            let p = std::path::Path::new(path);
+            let rules = crate::rules_file::load(p)?;
+            Ok(Some(rules))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Resolve rule-file protected paths to canonical PathBufs (relative to CWD).
+fn resolve_protected_paths(paths: &[String]) -> Vec<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    paths
+        .iter()
+        .map(|p| {
+            let pb = PathBuf::from(p);
+            if pb.is_absolute() { pb } else { cwd.join(&pb) }
+        })
+        .collect()
+}
+
+/// Build a Scanner, optionally with rule-file protected paths applied.
+fn build_scanner(rules: Option<&RulesFile>) -> Scanner {
+    let scanner = Scanner::new();
+    if let Some(r) = rules {
+        if !r.protected_paths.paths.is_empty() {
+            let paths = resolve_protected_paths(&r.protected_paths.paths);
+            return scanner.with_protected_paths(paths);
+        }
+    }
+    scanner
+}
+
+/// Print a brief rule-file influence summary to stdout.
+fn print_rule_summary(rules: &RulesFile) {
+    println!(
+        "  Rule file: {} alias(es) loaded, {} path(s) protected, {} custom destination(s)",
+        rules.aliases.len(),
+        rules.protected_paths.paths.len(),
+        rules.staging_destinations.len()
+    );
+    if !rules.protected_paths.paths.is_empty() {
+        for p in &rules.protected_paths.paths {
+            println!("    🔒 Protected: {p}");
+        }
+    }
+    println!();
+}
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
@@ -21,9 +74,19 @@ pub fn run(cli: Cli) -> Result<()> {
             output,
             depth,
             exclude,
+            rule_file,
         } => {
             let target = resolve_target(path, home)?;
-            cmd_scan(&target, mode, format, output, depth, &exclude)
+            let rules = load_rules(&rule_file)?;
+            cmd_scan(
+                &target,
+                mode,
+                format,
+                output,
+                depth,
+                &exclude,
+                rules.as_ref(),
+            )
         }
         Commands::Plan {
             path,
@@ -32,15 +95,20 @@ pub fn run(cli: Cli) -> Result<()> {
             output,
             depth,
             exclude,
+            rule_file,
         } => {
             let target = resolve_target(path, home)?;
-            cmd_plan(&target, mode, output, depth, &exclude)
+            let rules = load_rules(&rule_file)?;
+            cmd_plan(&target, mode, output, depth, &exclude, rules.as_ref())
         }
         Commands::Profile { path, home } => {
             let target = resolve_target(path, home)?;
             cmd_profile(&target)
         }
-        Commands::Explain { path } => cmd_explain(&path),
+        Commands::Explain { path, rule_file } => {
+            let rules = load_rules(&rule_file)?;
+            cmd_explain(&path, rules.as_ref())
+        }
         Commands::Apply { .. } => cmd_apply(),
     }
 }
@@ -273,11 +341,12 @@ fn cmd_scan(
     output: Option<String>,
     depth: usize,
     exclude: &[String],
+    rules: Option<&RulesFile>,
 ) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = org_mode(mode);
 
-    let scanner = Scanner::new();
+    let scanner = build_scanner(rules);
     let report = scanner.scan(target, &home, depth, exclude)?;
 
     // Also run systemic detectors
@@ -285,6 +354,13 @@ fn cmd_scan(
     let _cron_evidence = detectors::cron::CronDetector::new().scan_all();
     drop(_systemd_evidence);
     drop(_cron_evidence);
+
+    // Print rule-file influence summary to stdout (terminal mode only).
+    if let Some(r) = rules {
+        if matches!(format, OutputFormat::Terminal) {
+            print_rule_summary(r);
+        }
+    }
 
     let rendered = match format {
         OutputFormat::Terminal => reports::terminal::render(&report),
@@ -303,7 +379,7 @@ fn cmd_scan(
 
     // If mode is not preview, show placement summary
     if !matches!(mode, OrgMode::Preview) {
-        show_placement_summary(target, &home, org, depth, exclude)?;
+        show_placement_summary(target, &home, org, depth, exclude, rules)?;
     }
 
     Ok(())
@@ -317,6 +393,7 @@ fn cmd_plan(
     output: Option<String>,
     depth: usize,
     exclude: &[String],
+    rules: Option<&RulesFile>,
 ) -> Result<()> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = org_mode(mode);
@@ -325,10 +402,18 @@ fn cmd_plan(
     println!("  SafeSort AI — Smart Placement Plan");
     println!("  Target: {}", target.display());
     println!("  Mode: {}", org.as_str());
+    if let Some(r) = rules {
+        println!(
+            "  Rule file: {} alias(es), {} protected path(s), {} custom destination(s)",
+            r.aliases.len(),
+            r.protected_paths.paths.len(),
+            r.staging_destinations.len()
+        );
+    }
     println!();
 
     // Run scan first
-    let scanner = Scanner::new();
+    let scanner = build_scanner(rules);
     let report = scanner.scan(target, &home, depth, exclude)?;
 
     // Extract items for placement engine
@@ -348,6 +433,11 @@ fn cmd_plan(
 
     // Run placement engine
     let engine = SmartPlacementEngine::new(home.clone(), org);
+    let engine = if let Some(r) = rules {
+        engine.with_rules(r)
+    } else {
+        engine
+    };
     let mut placement = engine.run(&items);
     placement.summary.skipped = report.summary.skipped;
 
@@ -473,6 +563,9 @@ fn render_recommendation(rec: &crate::placement::engine::PlacementRecommendation
 
     println!("  │ Why:        {}", rec.reason);
     println!("  │ Action:     {}", rec.band.as_str());
+    if let Some(ref note) = rec.rule_note {
+        println!("  │ Rule:       {}", note);
+    }
     println!("  └─────────────────────────────────────────────");
     println!();
 }
@@ -483,8 +576,9 @@ fn show_placement_summary(
     org: OrganizationMode,
     depth: usize,
     exclude: &[String],
+    rules: Option<&RulesFile>,
 ) -> Result<()> {
-    let scanner = Scanner::new();
+    let scanner = build_scanner(rules);
     let report = scanner.scan(target, home, depth, exclude)?;
 
     let items: Vec<(PathBuf, crate::scan::risk::SafetyLevel)> = report
@@ -502,6 +596,11 @@ fn show_placement_summary(
         .collect();
 
     let engine = SmartPlacementEngine::new(home.clone(), org);
+    let engine = if let Some(r) = rules {
+        engine.with_rules(r)
+    } else {
+        engine
+    };
     let placement = engine.run(&items);
 
     let summary = &placement.summary;
@@ -641,7 +740,7 @@ fn find_service_bindings(target: &Path) -> Vec<ServiceBinding> {
     bindings
 }
 
-fn cmd_explain(path: &str) -> Result<()> {
+fn cmd_explain(path: &str, rules: Option<&RulesFile>) -> Result<()> {
     let target = PathBuf::from(path);
     if !target.exists() {
         return Err(SafeSortError::InvalidPath(format!(
@@ -651,7 +750,7 @@ fn cmd_explain(path: &str) -> Result<()> {
 
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
 
-    let scanner = Scanner::new();
+    let scanner = build_scanner(rules);
     let parent = target
         .parent()
         .map(|p| p.to_path_buf())
@@ -701,6 +800,44 @@ fn cmd_explain(path: &str) -> Result<()> {
     } else {
         println!("  Item not found in scan results. Try scanning its parent:");
         println!("    safesort scan --path {}", parent.display());
+    }
+
+    // Show rule-file influence.
+    if let Some(r) = rules {
+        let path_str = target.to_string_lossy().to_string();
+        let is_rule_protected = r.protected_paths.paths.iter().any(|p| {
+            let pb = std::path::Path::new(p);
+            path_str.contains(p.as_str()) || target.starts_with(pb) || target.ends_with(pb)
+        });
+        let file_name = target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let alias_match = r
+            .aliases
+            .iter()
+            .find(|(token, _)| file_name.contains(token.as_str()));
+
+        if is_rule_protected || alias_match.is_some() || !r.staging_destinations.is_empty() {
+            println!();
+            println!("  Rule file influence:");
+        }
+        if is_rule_protected {
+            println!("    🔒 Protected path — rule file marks this as LOCKED");
+        }
+        if let Some((token, canonical)) = alias_match {
+            println!("    👤 Alias match: '{}' → '{}'", token, canonical);
+            if let Some(owner_rule) = r.owners.get(canonical.as_str()) {
+                println!(
+                    "       Owner: {} ({})",
+                    owner_rule.display, owner_rule.category
+                );
+                if !owner_rule.safe_root.is_empty() {
+                    println!("       Safe root: {}", owner_rule.safe_root);
+                }
+            }
+        }
     }
 
     if is_service_bound {

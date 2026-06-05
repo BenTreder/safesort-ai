@@ -52,6 +52,10 @@ pub enum Commands {
         /// Exclude paths matching this name or substring (repeatable)
         #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
         exclude: Vec<String>,
+
+        /// Path to a TOML rule file for custom aliases, protected paths, and staging destinations
+        #[arg(long, value_name = "FILE")]
+        rule_file: Option<String>,
     },
 
     /// Generate a smart placement plan with recommendations
@@ -79,6 +83,10 @@ pub enum Commands {
         /// Exclude paths matching this name or substring (repeatable)
         #[arg(long, action = clap::ArgAction::Append, value_name = "PATTERN")]
         exclude: Vec<String>,
+
+        /// Path to a TOML rule file for custom aliases, protected paths, and staging destinations
+        #[arg(long, value_name = "FILE")]
+        rule_file: Option<String>,
     },
 
     /// Analyze user profile from a path
@@ -96,6 +104,10 @@ pub enum Commands {
     Explain {
         /// Path to explain
         path: String,
+
+        /// Path to a TOML rule file for custom aliases, protected paths, and staging destinations
+        #[arg(long, value_name = "FILE")]
+        rule_file: Option<String>,
     },
 
     /// Apply a plan (DISABLED in this safety-first build)

@@ -1,0 +1,101 @@
+# SafeSort AI — Custom Rule File
+# Version: 1.0
+#
+# This file configures aliases, protected paths, and custom staging destinations.
+#
+# SAFETY NOTES:
+# - Rules are READ-ONLY hints. They influence recommendations only.
+# - Rules cannot bypass LOCKED or REVIEW safety classifications.
+# - Rules cannot move, delete, rename, or copy files.
+# - Rules are only loaded when --rule-file is explicitly passed.
+# - Rules are NEVER auto-loaded from ~/.safesort/ or any other path.
+# - Rules do not persist. Each run loads fresh from this file.
+# - Custom destinations are validated for safety before use.
+#   Destinations pointing to /etc, /usr, /var, public_html, htdocs,
+#   www, live-site, or other restricted paths are rejected automatically.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Aliases
+# Maps a token (found in a filename or path) to a canonical owner/brand name.
+# Tokens are matched case-insensitively.
+# ─────────────────────────────────────────────────────────────────────────────
+[aliases]
+"bentreder"            = "BenTreder.com"
+"ben treder"           = "BenTreder.com"
+"ben-treder"           = "BenTreder.com"
+"quicktapid"           = "QuickTapID"
+"websitefixfinder"     = "Website Fix Finder"
+"website-fix-finder"   = "Website Fix Finder"
+"contenthandoff"       = "Treder Client Content Handoff"
+"content-handoff"      = "Treder Client Content Handoff"
+"safe-sort"            = "SafeSort AI"
+"safesort"             = "SafeSort AI"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Owners
+# Maps a canonical name to display metadata and a safe staging root.
+# safe_root is a recommendation only — it is never created automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+[owners."BenTreder.com"]
+display  = "Ben Treder / BenTreder.com"
+category = "Website"
+safe_root = "~/Workspace/03_Websites/BenTreder.com/Incoming Assets"
+
+[owners."QuickTapID"]
+display  = "QuickTapID"
+category = "Website"
+safe_root = "~/Workspace/03_Websites/QuickTapID.com/Incoming Assets"
+
+[owners."Website Fix Finder"]
+display  = "Website Fix Finder"
+category = "WordPressPlugin"
+safe_root = "~/Workspace/04_WordPress/Plugins/Website Fix Finder"
+
+[owners."Treder Client Content Handoff"]
+display  = "Treder Client Content Handoff"
+category = "Project"
+safe_root = "~/Workspace/06_Business/Client Handoffs"
+
+[owners."SafeSort AI"]
+display  = "SafeSort AI"
+category = "Project"
+safe_root = "~/Workspace/05_AI Workflow/SafeSort AI"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Protected paths
+# Paths listed here are treated as LOCKED — never auto-planned, never SAFE.
+# Children of protected paths inherit REVIEW classification.
+# Paths are resolved relative to the current working directory if not absolute.
+#
+# SAFETY: These paths are never modified — listing them here only marks them
+# as protected in scan and plan output. No filesystem changes occur.
+# ─────────────────────────────────────────────────────────────────────────────
+[protected_paths]
+paths = [
+  "./safesort_demo/ImportantApp",
+  "./safesort_demo/public_html"
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Staging destinations
+# Custom recommended destinations per owner + purpose combination.
+# Key format: "{canonical_owner}.{purpose}" (purpose lowercase).
+# Value: a safe path (tilde notation preferred, e.g. ~/Workspace/...).
+#
+# SAFETY: All destinations are validated before use. Destinations pointing
+# to live-site folders (/var/www/public_html, htdocs, www, etc.) or system
+# paths (/etc, /usr, /var) are automatically rejected with a warning.
+# The folder is never created. This is a recommendation display only.
+# ─────────────────────────────────────────────────────────────────────────────
+[staging_destinations]
+"BenTreder.com.logo"                       = "~/Workspace/06_Business/Brand Assets/BenTreder/Logos/"
+"BenTreder.com.banner"                     = "~/Workspace/03_Websites/BenTreder.com/Incoming Assets/Banners/"
+"BenTreder.com.screenshot"                 = "~/Workspace/03_Websites/BenTreder.com/Incoming Assets/Screenshots/"
+"QuickTapID.banner"                        = "~/Workspace/03_Websites/QuickTapID.com/Incoming Assets/Banners/"
+"QuickTapID.screenshot"                    = "~/Workspace/03_Websites/QuickTapID.com/Incoming Assets/Screenshots/"
+"Website Fix Finder.release_zip"           = "~/Workspace/04_WordPress/Plugins/Website Fix Finder/Release Zips/"
+"Website Fix Finder.screenshot"            = "~/Workspace/04_WordPress/Plugins/Website Fix Finder/Screenshots/"
+"Treder Client Content Handoff.document"   = "~/Workspace/06_Business/Client Handoffs/Documents/"
+"Treder Client Content Handoff.image"      = "~/Workspace/06_Business/Client Handoffs/Images/"
+"SafeSort AI.report"                       = "~/Workspace/05_AI Workflow/Generated Reports/SafeSort AI/"
+"SafeSort AI.document"                     = "~/Workspace/05_AI Workflow/SafeSort AI/Docs/"

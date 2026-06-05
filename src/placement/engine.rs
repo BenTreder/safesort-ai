@@ -1,10 +1,11 @@
 use super::confidence::{Confidence, ConfidenceBand};
-use super::destination::{DestinationPlanner, PlacementDestination};
+use super::destination::{DestinationPlanner, DestinationRisk, PlacementDestination};
 use super::file_purpose::{FilePurpose, FilePurposeDetector};
-use super::ownership::OwnershipDetector;
+use super::ownership::{OwnerCategory, OwnershipDetector};
 use super::question_queue::{Question, QuestionOption, QuestionQueue};
 use super::rules::RulesEngine;
 use crate::scan::risk::SafetyLevel;
+use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 
 /// Organization modes for SafeSort AI.
@@ -58,6 +59,8 @@ pub struct PlacementRecommendation {
     pub reason: String,
     /// What band this falls into.
     pub band: ConfidenceBand,
+    /// Rule-file influence note, if any (alias match, custom destination, protected path).
+    pub rule_note: Option<String>,
 }
 
 /// Result of running the smart placement engine.
@@ -93,6 +96,10 @@ pub struct SmartPlacementEngine {
     rules: RulesEngine,
     mode: OrganizationMode,
     home: PathBuf,
+    /// Custom staging destinations from a rule file: "{canonical}.{purpose}" → path.
+    custom_destinations: IndexMap<String, String>,
+    /// Owner safe roots from a rule file: canonical → safe_root path.
+    owner_safe_roots: IndexMap<String, String>,
 }
 
 impl SmartPlacementEngine {
@@ -105,7 +112,43 @@ impl SmartPlacementEngine {
             rules: RulesEngine::new(),
             mode,
             home,
+            custom_destinations: IndexMap::new(),
+            owner_safe_roots: IndexMap::new(),
         }
+    }
+
+    /// Builder: inject aliases and custom destinations from a rule file.
+    ///
+    /// This is the only supported entry point for rule-file integration.
+    /// Rules influence recommendations only — they never move files,
+    /// bypass safety classification, or persist to disk.
+    pub fn with_rules(mut self, rules: &crate::rules_file::RulesFile) -> Self {
+        // Inject aliases into the ownership detector.
+        for (token, canonical) in &rules.aliases {
+            let (display, category) = if let Some(owner_rule) = rules.owners.get(canonical) {
+                (
+                    owner_rule.display.clone(),
+                    category_from_str(&owner_rule.category),
+                )
+            } else {
+                (canonical.clone(), OwnerCategory::Unknown)
+            };
+            self.ownership
+                .add_alias(token, canonical, &display, category);
+        }
+
+        // Store custom staging destinations (validation happens in analyze_file).
+        self.custom_destinations = rules.staging_destinations.clone();
+
+        // Store owner safe roots (used as fallback destinations).
+        self.owner_safe_roots = rules
+            .owners
+            .iter()
+            .filter(|(_, r)| !r.safe_root.is_empty())
+            .map(|(canonical, r)| (canonical.clone(), r.safe_root.clone()))
+            .collect();
+
+        self
     }
 
     /// Access the rules engine for customization.
@@ -157,11 +200,64 @@ impl SmartPlacementEngine {
         }
 
         // Generate destinations
-        let destinations = if matches!(safety_level, SafetyLevel::Locked) {
+        let mut destinations = if matches!(safety_level, SafetyLevel::Locked) {
             vec![]
         } else {
             self.destination.plan(owner.as_ref(), purpose, is_safe_zone)
         };
+
+        // Apply rule-file custom destinations (if not LOCKED).
+        let mut rule_note: Option<String> = None;
+        if !matches!(safety_level, SafetyLevel::Locked) {
+            if let Some(ref o) = owner {
+                // 1. Try specific staging destination: "{canonical}.{purpose}"
+                let key = format!("{}.{}", o.canonical, purpose.as_str().to_lowercase());
+                if let Some(custom_dest) = self.custom_destinations.get(&key) {
+                    if crate::rules_file::validation::is_safe_destination(custom_dest) {
+                        let expanded = expand_tilde(custom_dest, &self.home);
+                        let label = format!("Custom (rule file): {}", dest_label(custom_dest));
+                        destinations.insert(
+                            0,
+                            PlacementDestination {
+                                description: label.clone(),
+                                path: expanded,
+                                is_staging: true,
+                                risk: DestinationRisk::LowRisk,
+                            },
+                        );
+                        rule_note =
+                            Some(format!("Staging destination from rule file (key: {})", key));
+                    } else {
+                        rule_note =
+                            Some(crate::rules_file::validation::rejection_reason(custom_dest));
+                    }
+                }
+                // 2. Fall back to owner safe_root if no specific destination matched.
+                if rule_note.is_none() {
+                    if let Some(safe_root) = self.owner_safe_roots.get(&o.canonical) {
+                        if crate::rules_file::validation::is_safe_destination(safe_root) {
+                            let expanded = expand_tilde(safe_root, &self.home);
+                            destinations.insert(
+                                0,
+                                PlacementDestination {
+                                    description: format!(
+                                        "Owner root (rule file): {}",
+                                        dest_label(safe_root)
+                                    ),
+                                    path: expanded,
+                                    is_staging: true,
+                                    risk: DestinationRisk::LowRisk,
+                                },
+                            );
+                            rule_note = Some(format!(
+                                "Owner safe_root from rule file for '{}'",
+                                o.canonical
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         // Build reason
         let reason = Self::build_reason(&owner, purpose, &safety_level, &confidence, is_safe_zone);
@@ -199,6 +295,7 @@ impl SmartPlacementEngine {
             destinations,
             reason,
             band: confidence.band(),
+            rule_note,
         }
     }
 
@@ -512,6 +609,39 @@ impl SmartPlacementEngine {
         } else {
             parts.join("; ")
         }
+    }
+}
+
+/// Expand a `~/...` path against the given home directory.
+fn expand_tilde(path: &str, home: &PathBuf) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+/// Extract a short display label from a destination path (last two components).
+fn dest_label(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let parts: Vec<_> = p.components().rev().take(2).collect();
+    let parts: Vec<_> = parts.into_iter().rev().collect();
+    parts
+        .iter()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Map an owner category string from the rule file to `OwnerCategory`.
+fn category_from_str(s: &str) -> OwnerCategory {
+    match s.to_lowercase().as_str() {
+        "website" => OwnerCategory::Website,
+        "brand" => OwnerCategory::Brand,
+        "project" => OwnerCategory::Project,
+        "plugin" | "wordpressplugin" | "wordpress_plugin" => OwnerCategory::Plugin,
+        "client" => OwnerCategory::Client,
+        _ => OwnerCategory::Unknown,
     }
 }
 

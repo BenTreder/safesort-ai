@@ -10,5 +10,6 @@ pub mod graph;
 pub mod placement;
 pub mod profile;
 pub mod reports;
+pub mod rules_file;
 pub mod safety;
 pub mod scan;

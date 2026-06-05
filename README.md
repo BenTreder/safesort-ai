@@ -179,6 +179,54 @@ cargo build --release
 
 The binary will be at `target/release/safesort`.
 
+## Custom Rule Files
+
+SafeSort AI supports optional, read-only rule files in TOML format that customize aliases, protected paths, and staging destination recommendations.
+
+```bash
+safesort scan --path ./safesort_demo --rule-file ./examples/safesort-rules.toml
+safesort plan --path ./safesort_demo/Downloads --mode guided --rule-file ./examples/safesort-rules.toml
+safesort explain ./safesort_demo/ImportantApp --rule-file ./examples/safesort-rules.toml
+```
+
+### What rule files can do
+- **Aliases** — map filename tokens (e.g. `acme`) to a canonical owner/brand (`ACME Corp`)
+- **Protected paths** — mark specific directories as LOCKED and never auto-plan eligible
+- **Staging destinations** — override recommended destination paths per `{owner}.{purpose}` pair
+- **Owner metadata** — provide display names, categories, and safe staging roots
+
+### What rule files cannot do
+- Move, rename, delete, copy, or modify any file
+- Bypass LOCKED or REVIEW safety classifications
+- Make unsafe items auto-plan eligible
+- Persist to disk or auto-load from `~/.safesort/`
+- Override risky destinations (live-site, system paths are rejected automatically)
+
+### Rule file format
+
+```toml
+[aliases]
+"mybrand" = "MyBrand"
+"my-brand" = "MyBrand"
+
+[owners."MyBrand"]
+display   = "My Brand Inc."
+category  = "Brand"
+safe_root = "~/Workspace/MyBrand/Incoming"
+
+[protected_paths]
+paths = [
+  "./ImportantApp",
+  "/srv/production"
+]
+
+[staging_destinations]
+"MyBrand.logo"       = "~/Workspace/Brand/MyBrand/Logos/"
+"MyBrand.document"   = "~/Workspace/Brand/MyBrand/Docs/"
+```
+
+See `examples/safesort-rules.toml` for a fully annotated example.
+
 ## Commands
 
 ### `safesort doctor`
@@ -227,6 +275,11 @@ Analyze user profile and recommend folder structure.
 
 ### `safesort explain`
 Explain the safety decision for a specific path.
+
+```bash
+safesort explain ./safesort_demo/ImportantApp
+safesort explain ./safesort_demo/ImportantApp --rule-file ./examples/safesort-rules.toml
+```
 
 ### `safesort apply`
 **DISABLED in this safety-first build.**

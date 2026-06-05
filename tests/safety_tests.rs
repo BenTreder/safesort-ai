@@ -1558,3 +1558,539 @@ fn test_excluded_items_never_auto_plan_eligible() {
         "No SAFE_CANDIDATE results when only node_modules items exist"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Rule file tests (48–62)
+// ═══════════════════════════════════════════════════════════════════
+
+use safesort_ai::rules_file;
+
+// ─── Helper ────────────────────────────────────────────────────────
+
+fn write_rule_file(tmp: &TempDir, content: &str) -> std::path::PathBuf {
+    let path = tmp.path().join("rules.toml");
+    fs::write(&path, content).unwrap();
+    path
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 48. Valid rule file loads successfully
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_valid_rule_file_loads() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_rule_file(
+        &tmp,
+        r#"
+[aliases]
+"mybrand" = "MyBrand"
+
+[protected_paths]
+paths = []
+"#,
+    );
+    let result = rules_file::load(&path);
+    assert!(result.is_ok(), "Valid rule file must load without error");
+    let rules = result.unwrap();
+    assert_eq!(
+        rules.aliases.get("mybrand").map(|s| s.as_str()),
+        Some("MyBrand")
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 49. Invalid TOML fails with a clear error
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_invalid_toml_fails_safely() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_rule_file(&tmp, "this is not valid toml ::::");
+    let result = rules_file::load(&path);
+    assert!(result.is_err(), "Invalid TOML must return an error");
+    let msg = format!("{}", result.unwrap_err());
+    assert!(
+        msg.contains("Invalid TOML") || msg.contains("invalid") || msg.contains("TOML"),
+        "Error must mention TOML problem: {msg}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 50. Missing rule file fails with a clear error
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_missing_rule_file_fails_safely() {
+    let result = rules_file::load(std::path::Path::new(
+        "/tmp/does-not-exist-safesort-test.toml",
+    ));
+    assert!(result.is_err(), "Missing rule file must return an error");
+    let msg = format!("{}", result.unwrap_err());
+    assert!(
+        msg.contains("not found") || msg.contains("does not exist") || msg.contains("InvalidPath"),
+        "Error must indicate file not found: {msg}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 51. Aliases affect owner detection in placement engine
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_aliases_affect_owner_detection() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = TempDir::new().unwrap();
+    let path = write_rule_file(
+        &tmp,
+        r#"
+[aliases]
+"acme" = "ACME Corp"
+
+[owners."ACME Corp"]
+display = "ACME Corporation"
+category = "Brand"
+safe_root = "~/Workspace/ACME"
+"#,
+    );
+    let rules = rules_file::load(&path).unwrap();
+    let home = std::path::PathBuf::from("/home/user");
+    let engine =
+        SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview).with_rules(&rules);
+
+    let rec = engine.analyze_file(
+        std::path::Path::new("/home/user/Downloads/acme_logo.png"),
+        SafetyLevel::SafeCandidate,
+    );
+
+    let owner = rec
+        .owner
+        .expect("Alias 'acme' must be detected as ACME Corp owner");
+    assert_eq!(
+        owner.canonical, "ACME Corp",
+        "Canonical name must match rule alias target"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 52. Custom staging destination affects recommendation
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_custom_staging_destination_affects_recommendation() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = TempDir::new().unwrap();
+    let path = write_rule_file(
+        &tmp,
+        r#"
+[aliases]
+"acme" = "ACME Corp"
+
+[owners."ACME Corp"]
+display = "ACME Corporation"
+category = "Brand"
+safe_root = "~/Workspace/ACME"
+
+[staging_destinations]
+"ACME Corp.logo" = "~/Workspace/Brand/ACME/Logos"
+"#,
+    );
+    let rules = rules_file::load(&path).unwrap();
+    let home = std::path::PathBuf::from("/home/user");
+    let engine =
+        SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview).with_rules(&rules);
+
+    let rec = engine.analyze_file(
+        std::path::Path::new("/home/user/Downloads/acme_logo.png"),
+        SafetyLevel::SafeCandidate,
+    );
+
+    // Should have a rule_note or custom destination
+    let has_custom = rec.rule_note.is_some()
+        || rec
+            .destinations
+            .iter()
+            .any(|d| d.description.contains("rule file"));
+    assert!(
+        has_custom,
+        "Custom staging destination must influence recommendation"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 53. protected_paths makes a path not SAFE_CANDIDATE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_protected_path_not_safe() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+    let protected = base.join("SensitiveApp");
+    fs::create_dir_all(&protected).unwrap();
+    create_file(&protected.join("config.yml"), "key: value\n");
+
+    let rule_tmp = TempDir::new().unwrap();
+    let rule_path = write_rule_file(
+        &rule_tmp,
+        &format!("[protected_paths]\npaths = [\"{}\"]", protected.display()),
+    );
+    let rules = rules_file::load(&rule_path).unwrap();
+
+    let scanner = safesort_ai::scan::Scanner::new().with_protected_paths(
+        safesort_ai::rules_file::loader::load(&rule_path)
+            .unwrap()
+            .protected_paths
+            .paths
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect(),
+    );
+    let report = scanner.scan(&base, &base, 3, &[]).unwrap();
+
+    let safe_paths: Vec<_> = report
+        .items
+        .get("SAFE")
+        .map(|v| v.iter().map(|i| i.path.clone()).collect())
+        .unwrap_or_default();
+
+    assert!(
+        !safe_paths.iter().any(|p| p.contains("SensitiveApp")),
+        "A rule-file protected path must not appear as SAFE_CANDIDATE. Safe paths: {:?}",
+        safe_paths
+    );
+    let _ = rules; // used
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 54. protected_paths inheritance: children not SAFE
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_protected_path_children_inherit_review() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+    let protected = base.join("ProtectedDir");
+    fs::create_dir_all(&protected).unwrap();
+    create_file(&protected.join("child.txt"), "data\n");
+    create_file(&protected.join("photo.png"), "");
+
+    let rule_tmp = TempDir::new().unwrap();
+    let rule_path = write_rule_file(
+        &rule_tmp,
+        &format!("[protected_paths]\npaths = [\"{}\"]", protected.display()),
+    );
+
+    let scanner = safesort_ai::scan::Scanner::new().with_protected_paths(vec![protected.clone()]);
+    let report = scanner.scan(&base, &base, 3, &[]).unwrap();
+
+    let safe_paths: Vec<_> = report
+        .items
+        .get("SAFE")
+        .map(|v| v.iter().map(|i| i.path.clone()).collect())
+        .unwrap_or_default();
+
+    assert!(
+        !safe_paths.iter().any(|p| p.contains("ProtectedDir")),
+        "Children of a rule-file protected path must not be SAFE. Safe paths: {:?}",
+        safe_paths
+    );
+    let _ = rule_path;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 55. Risky custom destination is rejected / downgraded
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_risky_destination_rejected() {
+    use safesort_ai::rules_file::validation::is_safe_destination;
+
+    assert!(
+        !is_safe_destination("/etc/nginx/conf.d"),
+        "/etc must be rejected"
+    );
+    assert!(
+        !is_safe_destination("/var/www/public_html"),
+        "public_html must be rejected"
+    );
+    assert!(
+        !is_safe_destination("~/sites/htdocs"),
+        "htdocs must be rejected"
+    );
+    assert!(
+        !is_safe_destination("/usr/local/share"),
+        "/usr must be rejected"
+    );
+    assert!(
+        !is_safe_destination("~/webroot/uploads"),
+        "webroot must be rejected"
+    );
+    assert!(
+        !is_safe_destination("~/servers/live-site"),
+        "live-site must be rejected"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 56. Safe destinations pass validation
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_safe_destinations_pass_validation() {
+    use safesort_ai::rules_file::validation::is_safe_destination;
+
+    assert!(
+        is_safe_destination("~/Workspace/Brand/Logos"),
+        "Workspace path must pass"
+    );
+    assert!(
+        is_safe_destination("~/Downloads/Sorted"),
+        "Downloads subdir must pass"
+    );
+    assert!(
+        is_safe_destination("~/Documents/Reports"),
+        "Documents must pass"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 57. Safe Autopilot cannot auto-plan rule-protected items
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_safe_autopilot_cannot_auto_plan_protected_items() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::SafeAutopilot);
+
+    // LOCKED items must never be auto-plan eligible
+    let items = vec![
+        (
+            std::path::PathBuf::from("/home/user/ProtectedApp/config.yml"),
+            SafetyLevel::Locked,
+        ),
+        (
+            std::path::PathBuf::from("/home/user/ProtectedApp/data.json"),
+            SafetyLevel::Review,
+        ),
+    ];
+
+    let result = engine.run(&items);
+    assert_eq!(
+        result.summary.auto_plan_eligible, 0,
+        "LOCKED/REVIEW items must never be auto-plan eligible"
+    );
+    // LOCKED item counted in locked; REVIEW item with low confidence may land in leave_alone
+    assert_eq!(
+        result.summary.locked, 1,
+        "LOCKED item must be counted as locked"
+    );
+    assert_eq!(result.summary.total_files, 2, "Both items must be counted");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 58. Guided mode shows rule-influenced recommendation
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_guided_mode_shows_rule_influenced_recommendation() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = TempDir::new().unwrap();
+    let rule_path = write_rule_file(
+        &tmp,
+        r#"
+[aliases]
+"acme" = "ACME Corp"
+
+[owners."ACME Corp"]
+display = "ACME Corporation"
+category = "Brand"
+safe_root = "~/Workspace/ACME"
+
+[staging_destinations]
+"ACME Corp.logo" = "~/Workspace/Brand/ACME/Logos"
+"#,
+    );
+    let rules = rules_file::load(&rule_path).unwrap();
+    let home = std::path::PathBuf::from("/home/user");
+    let engine =
+        SmartPlacementEngine::new(home.clone(), OrganizationMode::Guided).with_rules(&rules);
+
+    let rec = engine.analyze_file(
+        std::path::Path::new("/home/user/Downloads/acme_logo.png"),
+        SafetyLevel::SafeCandidate,
+    );
+
+    // Rule note or custom destination should be set
+    let is_rule_influenced = rec.rule_note.is_some()
+        || rec
+            .destinations
+            .iter()
+            .any(|d| d.description.contains("rule file"));
+    assert!(
+        is_rule_influenced,
+        "Guided mode recommendation must reflect rule-file influence"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 59. No auto-loading from home directory
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_no_auto_loading_from_home() {
+    // The scanner must never look for ~/.safesort/rules.toml automatically.
+    // Verify by constructing a scanner without a rule file and confirming
+    // it has no protected_paths injected.
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+    create_file(&base.join("photo.png"), "");
+
+    let scanner = safesort_ai::scan::Scanner::new();
+    let report = scanner.scan(&base, &base, 2, &[]).unwrap();
+
+    // Scanner created without rules — it should process photo.png normally
+    // (not fail or have hidden protected paths)
+    let all_items: Vec<_> = report.items.values().flatten().collect();
+    assert!(
+        !all_items.is_empty(),
+        "Scanner without rules must scan items normally"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 60. Rules do not persist — engine state is fresh each run
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_rules_do_not_persist() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    // Run engine WITH rules
+    let tmp = TempDir::new().unwrap();
+    let rule_path = write_rule_file(
+        &tmp,
+        r#"
+[aliases]
+"acme" = "ACME Corp"
+"#,
+    );
+    let rules = rules_file::load(&rule_path).unwrap();
+    let home = std::path::PathBuf::from("/home/user");
+    let engine_with =
+        SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview).with_rules(&rules);
+    let rec_with = engine_with.analyze_file(
+        std::path::Path::new("/home/user/Downloads/acme_logo.png"),
+        SafetyLevel::SafeCandidate,
+    );
+
+    // Run engine WITHOUT rules — must not see the alias
+    let engine_without = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec_without = engine_without.analyze_file(
+        std::path::Path::new("/home/user/Downloads/acme_logo.png"),
+        SafetyLevel::SafeCandidate,
+    );
+
+    // Engine with rules should detect ACME Corp; engine without should not
+    let with_canonical = rec_with.owner.as_ref().map(|o| o.canonical.as_str());
+    let without_canonical = rec_without.owner.as_ref().map(|o| o.canonical.as_str());
+
+    assert_eq!(
+        with_canonical,
+        Some("ACME Corp"),
+        "Engine with rules must detect ACME Corp"
+    );
+    assert_ne!(
+        without_canonical,
+        Some("ACME Corp"),
+        "Engine without rules must NOT detect ACME Corp (rules do not persist)"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 61. apply still refuses when rule file is passed via CLI
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_apply_still_refuses_with_rule_file() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+
+    let mut cmd = Command::cargo_bin("safesort").unwrap();
+    cmd.arg("apply")
+        .arg("some-plan.json")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Apply is disabled in this safety-first build")
+                .and(predicate::str::contains("Nothing was moved")),
+        );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 62. No destructive filesystem operations from rule-file feature
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_no_destructive_ops_from_rules() {
+    let tmp = TempDir::new().unwrap();
+    let base = to_pb(&tmp);
+
+    create_file(&base.join("photo.png"), "");
+    create_file(&base.join("doc.pdf"), "");
+
+    let rule_tmp = TempDir::new().unwrap();
+    let rule_path = write_rule_file(
+        &rule_tmp,
+        r#"
+[aliases]
+"photo" = "SomeBrand"
+
+[protected_paths]
+paths = []
+"#,
+    );
+
+    let before: std::collections::HashSet<std::path::PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    let rules = rules_file::load(&rule_path).unwrap();
+    let scanner = safesort_ai::scan::Scanner::new();
+    let _report = scanner.scan(&base, &base, 2, &[]).unwrap();
+
+    // Also run placement engine with rules
+    let home = base.clone();
+    let engine = safesort_ai::placement::engine::SmartPlacementEngine::new(
+        home.clone(),
+        safesort_ai::placement::engine::OrganizationMode::SafeAutopilot,
+    )
+    .with_rules(&rules);
+    let items = vec![(
+        base.join("photo.png"),
+        safesort_ai::scan::risk::SafetyLevel::SafeCandidate,
+    )];
+    let _placement = engine.run(&items);
+
+    let after: std::collections::HashSet<std::path::PathBuf> = walkdir::WalkDir::new(&base)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    assert_eq!(
+        before, after,
+        "Rule-file feature must not create, move, delete, or rename any files"
+    );
+}

@@ -8,6 +8,7 @@ mod error;
 mod placement;
 mod profile;
 mod reports;
+mod rules_file;
 mod safety;
 mod scan;
 

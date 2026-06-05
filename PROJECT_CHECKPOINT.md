@@ -1,12 +1,12 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 2 stabilization — depth/exclude controls)
-**Version**: 0.2.4
-**Phase**: 2 in progress — depth/exclude wired; impact + parent-risk inheritance complete
+**Date**: 2026-06-05 (Phase 2 — read-only custom rule files)
+**Version**: 0.3.0
+**Phase**: 2 in progress — rule files, depth/exclude, impact, and parent-risk inheritance all complete
 
 ## Safety Audit Summary (2026-06-05)
 
-- **160 tests passing** (51 lib + 39 bin + 23 placement + 47 safety)
+- **183 tests passing** (55 lib + 43 bin + 23 placement + 62 safety)
 - **apply still disabled** — prints "Nothing was moved." unconditionally
 - **Safe Autopilot still plan-only** — no moves, no file operations
 - **Guided Review still plan-only** — question queue only, no moves
@@ -31,6 +31,18 @@ Impact level is now derived from evidence and surfaced throughout the tool:
 | Fake-systemd `scan_dir` for explain command | ✅ |
 | 7 new impact-focused tests | ✅ |
 | `.gitignore` ignores `target/` and `safesort_demo/` | ✅ |
+| **Read-only custom rule files (v0.3.0)** | |
+| `--rule-file <FILE>` on scan, plan, explain | ✅ |
+| `src/rules_file/` module (schema, loader, validation) | ✅ |
+| Alias injection into OwnershipDetector | ✅ |
+| Protected paths → LOCKED + child inheritance | ✅ |
+| Custom staging destinations with safety validation | ✅ |
+| Risky destination auto-rejection | ✅ |
+| `PlacementRecommendation.rule_note` field | ✅ |
+| Explain shows rule-file influence | ✅ |
+| Rules never bypass safety / never persist / never auto-load | ✅ |
+| 15 new rule-file tests | ✅ |
+| `examples/safesort-rules.toml` annotated example | ✅ |
 | **Depth and exclude controls (v0.2.4)** | |
 | `--depth <N>` on scan and plan | ✅ |
 | `--exclude <PATTERN>` (repeatable) on scan and plan | ✅ |

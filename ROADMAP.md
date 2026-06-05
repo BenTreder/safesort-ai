@@ -40,7 +40,7 @@
 
 ## Phase 2: Dependency Graph + Impact Visibility ⚠️ IN PROGRESS
 
-**Status**: v0.2.4 — impact wired into scan and plan output; `--depth` and `--exclude` added; parent-risk inheritance complete.
+**Status**: v0.3.0 — read-only custom rule files added (`--rule-file`); `--depth` and `--exclude` added; parent-risk inheritance complete; impact wired throughout.
 `apply` remains disabled. Nothing is moved.
 
 > **Demo fixture path**: `./safesort_demo/` (gitignored)
@@ -62,6 +62,17 @@
 - [x] Scan terminal output: impact summary block + inline impact per example
 - [x] `PlacementRecommendation.impact_level` + impact icon in plan output
 - [x] Safe Autopilot explicit gate: MEDIUM/HIGH/CRITICAL impact → never auto-plan
+- [x] `--rule-file <FILE>` flag on scan, plan, explain
+- [x] `src/rules_file/` module: schema, loader, validation
+- [x] Alias injection into OwnershipDetector from rule file
+- [x] Protected paths from rule file → LOCKED + children inherit REVIEW
+- [x] Custom staging destinations from rule file (with safety validation)
+- [x] Risky custom destinations auto-rejected (system paths, live-site paths)
+- [x] `PlacementRecommendation.rule_note` — shows rule-file influence in plan output
+- [x] Explain command shows rule-file protected path + alias influence
+- [x] Rules never bypass safety policy, never persist, never auto-load
+- [x] 15 new rule-file tests (total 183 passing)
+- [x] `examples/safesort-rules.toml` — fully annotated example
 - [x] `--depth <N>` flag — limits traversal depth on scan and plan
 - [x] `--exclude <PATTERN>` flag (repeatable) — skips items by name or path substring
 - [x] `SafetySummary.skipped` count — excluded items tracked in summary
@@ -87,7 +98,6 @@
 - [ ] Detect Git remote URLs pointing to local paths
 - [ ] Impact analysis: "Moving X would break Y, Z"
 - [ ] Per-file ownership overrides in scan results
-- [ ] `--rule-file` flag for custom alias/destination rules
 - [ ] Export/import rules as TOML
 
 ## Phase 3: Plan Generation

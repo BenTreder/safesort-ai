@@ -42,7 +42,20 @@ Every scan now reports an **impact level** derived from evidence:
 
 Safe Autopilot only ever considers items with **NONE** or **LOW** impact for auto-planning. MEDIUM/HIGH/CRITICAL items are always routed to human review.
 
-### 5. Depth and Exclude Controls
+### 5. Read-Only Custom Rule Files
+
+Rule files let users add aliases, protected paths, and custom staging destinations. Safety guarantees enforced unconditionally:
+
+- **Loaded on demand only** — never auto-loaded from `~/.safesort/` or any other path. Only activated when `--rule-file <FILE>` is explicitly passed.
+- **No file operations** — rules never create, move, rename, delete, or copy any file. They produce recommendation text only.
+- **No persistence** — rules are not written to disk. Each run loads fresh from the specified file. Engine state is not shared between runs.
+- **No safety bypass** — rules cannot promote a LOCKED or REVIEW item to SAFE_CANDIDATE. Safety classification is always re-derived from evidence.
+- **Destination validation** — custom staging destinations are checked before use. Destinations matching `/etc`, `/usr`, `/var`, `/boot`, `public_html`, `htdocs`, `www`, `live-site`, `live_site`, `webroot`, or other restricted patterns are rejected with a warning. The rejection reason is shown in the recommendation.
+- **Protected paths** — paths listed under `[protected_paths]` are treated as LOCKED roots. Their children inherit REVIEW classification via the existing parent-risk inheritance pass. No filesystem changes occur.
+- **Aliases** — only affect ownership detection in recommendations. They do not affect safety classification.
+- **Safe Autopilot** — cannot auto-plan rule-protected items, items with MEDIUM/HIGH/CRITICAL impact, or items with risky custom destinations.
+
+### 6. Depth and Exclude Controls
 
 SafeSort AI supports two traversal controls for managing large or complex directories:
 
