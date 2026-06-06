@@ -119,10 +119,22 @@ pub fn build_plan_manifest(
         // Sensitive docs allowed in local mode (go to SensitiveDocuments/) but not legacy mode.
         let path_str = rec.file_path.to_string_lossy();
         let dest_is_sensitive_docs = planned_destination.contains("SensitiveDocuments");
+
+        // Extension-fallback destinations are direct children of the safesort root
+        // (e.g., "safesort/PDFs", "safesort/Audio") with no owner segment.
+        // These get a lower confidence threshold since they use safe type-only routing.
+        let dest_is_extension_fallback = planned_destination
+            .rfind("/safesort/")
+            .map(|idx| {
+                let after = &planned_destination[idx + "/safesort/".len()..];
+                !after.contains('/')
+            })
+            .unwrap_or(false);
+
         let assisted_plan_eligible = !auto_plan_eligible  // exclusive with auto
             && matches!(rec.safety_level, SafetyLevel::SafeCandidate)
             && impact_ok
-            && rec.confidence.value() >= 60
+            && (rec.confidence.value() >= 60 || dest_is_extension_fallback)
             && !matches!(rec.purpose, FilePurpose::Code | FilePurpose::Unknown)
             // Sensitive docs only allowed in assisted when in local mode (SensitiveDocuments/)
             && (!matches!(rec.purpose, FilePurpose::SensitiveDocument) || dest_is_sensitive_docs)

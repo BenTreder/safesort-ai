@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 // ─── Extension group labels ─────────────────────────────────────────
 
 /// Map a file extension (without dot, lowercase) to a display group name.
+/// Used for owner-subfolder labels (e.g., QuickTapID/PDFs).
 pub fn ext_group(extension: &str) -> &'static str {
     match extension.to_lowercase().as_str() {
         "pdf" => "PDFs",
@@ -31,6 +32,31 @@ pub fn ext_group(extension: &str) -> &'static str {
         "txt" => "TXT",
         "csv" => "CSV",
         "xlsx" | "xls" => "Spreadsheets",
+        "pptx" | "ppt" => "Presentations",
+        "html" | "htm" => "HTML",
+        _ => "Other",
+    }
+}
+
+/// Map a file extension to a top-level extension-fallback folder name.
+/// Used when no owner is known. Multiple audio/video/archive formats
+/// collapse into single shared folders for a cleaner result.
+pub fn fallback_folder(extension: &str) -> &'static str {
+    match extension.to_lowercase().as_str() {
+        "pdf" => "PDFs",
+        "png" => "PNGs",
+        "jpg" | "jpeg" => "JPGs",
+        "webp" => "WEBPs",
+        "gif" => "GIFs",
+        "svg" => "SVGs",
+        "bmp" | "ico" => "Images",
+        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" => "Archives",
+        "mp3" | "wav" | "flac" | "ogg" | "aac" => "Audio",
+        "mp4" | "mov" | "mkv" | "avi" | "webm" => "Video",
+        "docx" | "doc" => "DOCX",
+        "epub" => "EPUB",
+        "txt" => "TXT",
+        "csv" | "xlsx" | "xls" => "Spreadsheets",
         "pptx" | "ppt" => "Presentations",
         "html" | "htm" => "HTML",
         _ => "Other",
@@ -181,8 +207,12 @@ pub fn local_destination(
             }
             FilePurpose::Invoice => "Receipts".to_string(),
             FilePurpose::ReleaseZip | FilePurpose::PluginAsset => "Plugins".to_string(),
-            FilePurpose::Backup | FilePurpose::Archive => "Other".to_string(),
-            _ => "Other".to_string(),
+            _ => {
+                // Extension-based fallback: route directly to safesort/{folder}/
+                // with no owner segment. This is intentionally flat — "safesort/PDFs/"
+                // rather than "safesort/Other/PDFs/", to keep results clean and browsable.
+                return safesort_root.join(fallback_folder(extension));
+            }
         },
     };
 
@@ -316,11 +346,12 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_png_goes_to_other() {
+    fn test_unknown_png_goes_to_fallback_pngs() {
         let dest = local_destination(&root(), None, FilePurpose::Image, "png");
         let s = dest.to_string_lossy();
-        assert!(s.contains("Other"), "got: {s}");
-        assert!(s.contains("PNGs"), "got: {s}");
+        // No owner → extension fallback → safesort/PNGs/ (not Other/PNGs)
+        assert!(s.ends_with("/PNGs"), "expected safesort/PNGs, got: {s}");
+        assert!(!s.contains("Other"), "should not be under Other, got: {s}");
     }
 
     #[test]
