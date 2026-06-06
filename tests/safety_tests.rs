@@ -6389,7 +6389,7 @@ fn test_unknown_png_goes_to_fallback_pngs() {
     assert!(!s.contains("Other"), "must not be under Other, got: {s}");
 }
 
-// 45. Sensitive PDF goes to SensitiveDocuments/PDFs in local mode
+// 45. Sensitive PDF goes to SensitiveInfo/PDFs in local mode
 #[test]
 fn test_sensitive_pdf_goes_to_sensitive_documents_local() {
     use safesort_ai::placement::file_purpose::FilePurpose;
@@ -6397,7 +6397,7 @@ fn test_sensitive_pdf_goes_to_sensitive_documents_local() {
     let root = std::path::PathBuf::from("/tmp/test/safesort");
     let dest = local_destination(&root, None, FilePurpose::SensitiveDocument, "pdf");
     let s = dest.to_string_lossy();
-    assert!(s.contains("SensitiveDocuments"), "got: {s}");
+    assert!(s.contains("SensitiveInfo"), "got: {s}");
     assert!(s.contains("PDFs"), "got: {s}");
 }
 
@@ -6681,16 +6681,16 @@ fn test_fallback_docx_routes_to_docx() {
 
 // 58. Unknown safe MP3 routes to safesort/Audio (audio fallback, not Audio/MP3s)
 #[test]
-fn test_fallback_mp3_routes_to_audio() {
+fn test_fallback_mp3_routes_to_mp3s() {
     use safesort_ai::placement::file_purpose::FilePurpose;
     use safesort_ai::placement::local_dest::local_destination;
     let root = std::path::PathBuf::from("/tmp/test/safesort");
     // Audio purpose has its own fixed routing (Audio/MP3s) regardless of owner
     // The fallback_folder itself maps mp3 → Audio; verify via fallback_folder directly.
     let folder = safesort_ai::placement::local_dest::fallback_folder("mp3");
-    assert_eq!(folder, "Audio");
+    assert_eq!(folder, "MP3s");
     let folder_wav = safesort_ai::placement::local_dest::fallback_folder("wav");
-    assert_eq!(folder_wav, "Audio");
+    assert_eq!(folder_wav, "WAVs");
     let _ = local_destination(&root, None, FilePurpose::Audio, "mp3"); // no panic
 }
 
@@ -6698,30 +6698,30 @@ fn test_fallback_mp3_routes_to_audio() {
 #[test]
 fn test_fallback_mp4_routes_to_video() {
     use safesort_ai::placement::local_dest::fallback_folder;
-    assert_eq!(fallback_folder("mp4"), "Video");
-    assert_eq!(fallback_folder("mov"), "Video");
-    assert_eq!(fallback_folder("mkv"), "Video");
+    assert_eq!(fallback_folder("mp4"), "MP4s");
+    assert_eq!(fallback_folder("mov"), "MOVs");
+    assert_eq!(fallback_folder("mkv"), "MKVs");
 }
 
 // 60. Unknown safe CSV/XLSX route to safesort/Spreadsheets
 #[test]
 fn test_fallback_csv_xlsx_routes_to_spreadsheets() {
     use safesort_ai::placement::local_dest::fallback_folder;
-    assert_eq!(fallback_folder("csv"), "Spreadsheets");
-    assert_eq!(fallback_folder("xlsx"), "Spreadsheets");
-    assert_eq!(fallback_folder("xls"), "Spreadsheets");
+    assert_eq!(fallback_folder("csv"), "CSVs");
+    assert_eq!(fallback_folder("xlsx"), "XLSXs");
+    assert_eq!(fallback_folder("xls"), "XLSs");
 }
 
 // 61. Unknown safe ZIP/TAR/GZ route to safesort/Archives
 #[test]
 fn test_fallback_archive_extensions_route_to_archives() {
     use safesort_ai::placement::local_dest::fallback_folder;
-    assert_eq!(fallback_folder("zip"), "Archives");
-    assert_eq!(fallback_folder("tar"), "Archives");
-    assert_eq!(fallback_folder("gz"), "Archives");
-    assert_eq!(fallback_folder("xz"), "Archives");
-    assert_eq!(fallback_folder("7z"), "Archives");
-    assert_eq!(fallback_folder("rar"), "Archives");
+    assert_eq!(fallback_folder("zip"), "ZIPs");
+    assert_eq!(fallback_folder("tar"), "TARs");
+    assert_eq!(fallback_folder("gz"), "GZs");
+    assert_eq!(fallback_folder("xz"), "XZs");
+    assert_eq!(fallback_folder("7z"), "7Zs");
+    assert_eq!(fallback_folder("rar"), "RARs");
 }
 
 // 62. Unknown safe file with weird extension goes to safesort/Other
@@ -6765,10 +6765,10 @@ fn test_sensitive_pdf_not_routed_to_fallback_pdfs() {
     let root = std::path::PathBuf::from("/tmp/test/safesort");
     let dest = local_destination(&root, None, FilePurpose::SensitiveDocument, "pdf");
     let s = dest.to_string_lossy();
-    // Must go to SensitiveDocuments/PDFs, never to the flat safesort/PDFs fallback
+    // Must go to SensitiveInfo/PDFs, never to the flat safesort/PDFs fallback
     assert!(
-        s.contains("SensitiveDocuments/PDFs"),
-        "sensitive docs must land in SensitiveDocuments/PDFs, got: {s}"
+        s.contains("SensitiveInfo/PDFs"),
+        "sensitive docs must land in SensitiveInfo/PDFs, got: {s}"
     );
 }
 
@@ -6851,4 +6851,146 @@ fn test_fallback_destinations_always_inside_safesort_root() {
             dest.display()
         );
     }
+}
+
+// v0.12: SensitiveInfo and extension fallback refinements
+#[test]
+fn test_sensitive_info_keyword_detection_extra_cases() {
+    use safesort_ai::placement::file_purpose::{FilePurpose, FilePurposeDetector};
+    let d = FilePurposeDetector::new();
+
+    for filename in [
+        "llar-2fa-rescue-links.pdf",
+        "WPbackup-codes.txt",
+        "Business Entity Filing Acknowledgment_B20260168200.pdf",
+        "mtd_bank_activity_5_2026.pdf",
+        "TaxDocuments_6372_020326.pdf",
+        "CP_575_B.pdf",
+        "creditReport_6071604478.pdf",
+    ] {
+        assert_eq!(
+            d.detect(filename, std::path::Path::new("/home/user/Downloads")),
+            FilePurpose::SensitiveDocument,
+            "{filename} should be SensitiveDocument"
+        );
+    }
+}
+
+#[test]
+fn test_sensitive_local_destination_uses_sensitive_info() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::local_dest::local_destination;
+    let root = std::path::PathBuf::from("/tmp/test/safesort");
+
+    let pdf = local_destination(&root, None, FilePurpose::SensitiveDocument, "pdf");
+    assert!(pdf.to_string_lossy().ends_with("/SensitiveInfo/PDFs"));
+
+    let txt = local_destination(&root, None, FilePurpose::SensitiveDocument, "txt");
+    assert!(txt.to_string_lossy().ends_with("/SensitiveInfo/TXTs"));
+}
+
+#[test]
+fn test_flat_extension_fallback_exact_folder_names() {
+    use safesort_ai::placement::local_dest::fallback_folder;
+
+    assert_eq!(fallback_folder("pdf"), "PDFs");
+    assert_eq!(fallback_folder("png"), "PNGs");
+    assert_eq!(fallback_folder("jpg"), "JPGs");
+    assert_eq!(fallback_folder("mp3"), "MP3s");
+    assert_eq!(fallback_folder("wav"), "WAVs");
+    assert_eq!(fallback_folder("mp4"), "MP4s");
+    assert_eq!(fallback_folder("zip"), "ZIPs");
+    assert_eq!(fallback_folder("csv"), "CSVs");
+    assert_eq!(fallback_folder("xlsx"), "XLSXs");
+    assert_eq!(fallback_folder("json"), "JSONs");
+    assert_eq!(fallback_folder("txt"), "TXTs");
+}
+
+#[test]
+fn test_loose_json_can_use_jsons_but_package_json_is_not_assisted() {
+    use safesort_ai::manifest::plan_manifest::build_plan_manifest;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let scan_root = home.join("Downloads");
+    let safesort_root = scan_root.join("safesort");
+    let engine = SmartPlacementEngine::new(home, OrganizationMode::SafeAutopilot)
+        .with_local_output(safesort_root);
+
+    let loose = scan_root.join("sls-logs.json");
+    let pkg = scan_root.join("package.json");
+
+    let items = vec![
+        (loose.clone(), SafetyLevel::SafeCandidate),
+        (pkg.clone(), SafetyLevel::SafeCandidate),
+    ];
+
+    let result = engine.run(&items);
+    let manifest = build_plan_manifest(
+        &scan_root,
+        OrganizationMode::SafeAutopilot,
+        &result.recommendations,
+        None,
+        2,
+    );
+
+    let loose_entry = manifest
+        .entries
+        .iter()
+        .find(|e| e.source_path.ends_with("sls-logs.json"))
+        .unwrap();
+    assert!(
+        loose_entry.planned_destination.ends_with("/JSONs"),
+        "loose json should route to JSONs, got {}",
+        loose_entry.planned_destination
+    );
+    assert!(
+        loose_entry.assisted_plan_eligible,
+        "loose safe json should be assisted eligible"
+    );
+
+    let package_entry = manifest
+        .entries
+        .iter()
+        .find(|e| e.source_path.ends_with("package.json"))
+        .unwrap();
+    assert!(
+        !package_entry.assisted_plan_eligible,
+        "package.json must not be assisted eligible"
+    );
+}
+#[test]
+fn test_business_welcome_letters_and_receipts_are_sensitive() {
+    use safesort_ai::placement::file_purpose::{FilePurpose, FilePurposeDetector};
+
+    let d = FilePurposeDetector::new();
+    let root = std::path::Path::new("/home/user/Downloads");
+
+    for filename in [
+        "Welcome Letter Universal_B20260168200.pdf",
+        "Welcome Letter Universal_B20260168200-1.pdf",
+        "Receipt (4_8_2026)_B20260168200.pdf",
+        "Receipt (4_8_2026)_B20260168200.pdf",
+    ] {
+        assert_eq!(
+            d.detect(filename, root),
+            FilePurpose::SensitiveDocument,
+            "{filename} should route to SensitiveInfo"
+        );
+    }
+}
+
+#[test]
+fn test_receipts_route_to_sensitive_info_local_destination() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::local_dest::local_destination;
+
+    let root = std::path::PathBuf::from("/tmp/test/safesort");
+    let dest = local_destination(&root, None, FilePurpose::Receipt, "pdf");
+    assert!(
+        dest.to_string_lossy().ends_with("/SensitiveInfo/PDFs"),
+        "receipts should route to SensitiveInfo/PDFs, got {}",
+        dest.display()
+    );
 }

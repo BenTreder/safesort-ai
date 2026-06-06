@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 // ─── Extension group labels ─────────────────────────────────────────
 
 /// Map a file extension (without dot, lowercase) to a display group name.
-/// Used for owner-subfolder labels (e.g., QuickTapID/PDFs).
+/// Used for owner-subfolder labels, for example QuickTapID/PDFs.
 pub fn ext_group(extension: &str) -> &'static str {
     match extension.to_lowercase().as_str() {
         "pdf" => "PDFs",
@@ -20,47 +20,57 @@ pub fn ext_group(extension: &str) -> &'static str {
         "webp" => "WEBPs",
         "gif" => "GIFs",
         "svg" => "SVGs",
-        "bmp" | "ico" => "Images",
+        "bmp" | "ico" | "tiff" | "heic" | "avif" => "Images",
+
         "zip" => "ZIPs",
-        "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" => "Archives",
+        "tar" => "TARs",
+        "gz" | "tgz" => "GZs",
+        "bz2" => "BZ2s",
+        "xz" => "XZs",
+        "zst" => "ZSTs",
+        "7z" => "7Zs",
+        "rar" => "RARs",
+
         "mp3" => "MP3s",
-        "wav" => "WAV",
-        "flac" | "ogg" | "aac" => "Audio",
-        "mp4" | "mov" | "mkv" | "avi" | "webm" => "MP4s",
-        "docx" | "doc" => "DOCX",
+        "wav" => "WAVs",
+        "flac" => "FLACs",
+        "ogg" => "OGGs",
+        "aac" => "AACs",
+        "opus" => "OPUSs",
+        "m4a" => "M4As",
+
+        "mp4" => "MP4s",
+        "mov" => "MOVs",
+        "mkv" => "MKVs",
+        "avi" => "AVIs",
+        "webm" => "WEBMs",
+
+        "docx" => "DOCX",
+        "doc" => "DOCs",
         "epub" => "EPUB",
-        "txt" => "TXT",
-        "csv" => "CSV",
-        "xlsx" | "xls" => "Spreadsheets",
-        "pptx" | "ppt" => "Presentations",
+        "txt" => "TXTs",
+        "md" => "MDs",
+        "rtf" => "RTFs",
+        "json" => "JSONs",
+        "xml" => "XMLs",
+
+        "csv" => "CSVs",
+        "xlsx" => "XLSXs",
+        "xls" => "XLSs",
+
+        "pptx" => "PPTXs",
+        "ppt" => "PPTs",
         "html" | "htm" => "HTML",
+
         _ => "Other",
     }
 }
 
 /// Map a file extension to a top-level extension-fallback folder name.
-/// Used when no owner is known. Multiple audio/video/archive formats
-/// collapse into single shared folders for a cleaner result.
+/// Used when no owner is known. This intentionally creates simple flat folders
+/// like `safesort/PDFs/`, `safesort/MP3s/`, `safesort/JSONs/`.
 pub fn fallback_folder(extension: &str) -> &'static str {
-    match extension.to_lowercase().as_str() {
-        "pdf" => "PDFs",
-        "png" => "PNGs",
-        "jpg" | "jpeg" => "JPGs",
-        "webp" => "WEBPs",
-        "gif" => "GIFs",
-        "svg" => "SVGs",
-        "bmp" | "ico" => "Images",
-        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" => "Archives",
-        "mp3" | "wav" | "flac" | "ogg" | "aac" => "Audio",
-        "mp4" | "mov" | "mkv" | "avi" | "webm" => "Video",
-        "docx" | "doc" => "DOCX",
-        "epub" => "EPUB",
-        "txt" => "TXT",
-        "csv" | "xlsx" | "xls" => "Spreadsheets",
-        "pptx" | "ppt" => "Presentations",
-        "html" | "htm" => "HTML",
-        _ => "Other",
-    }
+    ext_group(extension)
 }
 
 // ─── Owner folder name sanitization ────────────────────────────────
@@ -84,13 +94,6 @@ fn strip_domain_suffix(s: &str) -> &str {
 /// - Capitalize the first letter of each word
 /// - Preserve digits
 /// - No spaces or special characters in output
-///
-/// Examples:
-/// - "BenTreder.com"  → "BenTreder"
-/// - "Ladybug Honey"  → "LadybugHoney"
-/// - "Big Win Jerky"  → "BigWinJerky"
-/// - "916 Hookup"     → "916Hookup"
-/// - "QuickTapID"     → "QuickTapID"
 pub fn clean_owner_folder_name(canonical: &str) -> String {
     let without_suffix = strip_domain_suffix(canonical);
     let mut result = String::new();
@@ -106,7 +109,6 @@ pub fn clean_owner_folder_name(canonical: &str) -> String {
                 capitalize_next = false;
             }
         } else {
-            // Delimiter: space, hyphen, underscore, dot → next letter is capitalized
             capitalize_next = true;
         }
     }
@@ -122,7 +124,7 @@ pub fn clean_owner_folder_name(canonical: &str) -> String {
 
 /// Optional subcategory folder for a given purpose.
 /// Returns None if no subcategory is needed.
-/// May contain a "/" to indicate nested subcategories (e.g., "Labels/Compliance").
+/// May contain a "/" to indicate nested subcategories, for example Labels/Compliance.
 pub fn subcategory_for(purpose: FilePurpose) -> Option<&'static str> {
     match purpose {
         FilePurpose::Logo | FilePurpose::Icon | FilePurpose::Favicon => Some("Logos"),
@@ -163,9 +165,17 @@ pub fn subcategory_for(purpose: FilePurpose) -> Option<&'static str> {
 
 /// Determine the local destination path for a file.
 ///
-/// Returns `safesort_root/{TopLevel}/{ExtGroup}/[Subcategory]/`.
+/// Known owners:
+///   safesort/{Owner}/{ExtGroup}/[Subcategory]/
 ///
-/// The `safesort_root` is `scan_target/safesort`.
+/// Unknown safe files:
+///   safesort/{ExtGroup}/
+///
+/// Sensitive/private info:
+///   safesort/SensitiveInfo/{ExtGroup}/
+///
+/// Risky code/unknown:
+///   safesort/Other/Review Needed/
 pub fn local_destination(
     safesort_root: &Path,
     owner: Option<&DetectedOwner>,
@@ -174,56 +184,49 @@ pub fn local_destination(
 ) -> PathBuf {
     let ext = ext_group(extension);
 
-    // Purposes that always use a fixed top-level category regardless of owner
-    match purpose {
-        FilePurpose::SensitiveDocument => {
-            return safesort_root.join("SensitiveDocuments").join(ext);
-        }
-        FilePurpose::Audio => {
-            return safesort_root.join("Audio").join(ext);
-        }
-        FilePurpose::Video => {
-            return safesort_root.join("Video").join(ext);
-        }
-        FilePurpose::Receipt => {
-            return safesort_root.join("Receipts").join(ext);
-        }
-        FilePurpose::Installer => {
-            return safesort_root.join("Apps").join(ext);
-        }
-        FilePurpose::Code | FilePurpose::Unknown => {
-            // Route to Other/Review Needed — not moved in any auto/assisted mode
-            return safesort_root.join("Other").join("Review Needed");
-        }
-        _ => {}
+    // Sensitive/private/account/legal/security information gets a clear local bucket.
+    // It is still only movable through assisted mode with backup + rollback.
+    if matches!(
+        purpose,
+        FilePurpose::SensitiveDocument | FilePurpose::Receipt
+    ) {
+        return safesort_root.join("SensitiveInfo").join(ext);
     }
 
-    // Determine top-level folder
-    let top_level: String = match owner {
-        Some(o) => clean_owner_folder_name(&o.canonical),
-        None => match purpose {
-            FilePurpose::Report | FilePurpose::Audit | FilePurpose::Document => {
-                "Reports".to_string()
-            }
-            FilePurpose::Invoice => "Receipts".to_string(),
-            FilePurpose::ReleaseZip | FilePurpose::PluginAsset => "Plugins".to_string(),
-            _ => {
-                // Extension-based fallback: route directly to safesort/{folder}/
-                // with no owner segment. This is intentionally flat — "safesort/PDFs/"
-                // rather than "safesort/Other/PDFs/", to keep results clean and browsable.
-                return safesort_root.join(fallback_folder(extension));
-            }
-        },
-    };
-
-    // Build path: safesort_root / top_level / ext / [subcategory parts]
-    let mut path = safesort_root.join(&top_level).join(ext);
-    if let Some(sub) = subcategory_for(purpose) {
-        for part in sub.split('/') {
-            path = path.join(part);
+    // Things that look like executable code or unknown/system-risk stay review-only,
+    // except loose harmless JSON/XML files can be organized by extension when the
+    // manifest safety gates also approve them.
+    if matches!(purpose, FilePurpose::Code) {
+        match extension.to_lowercase().as_str() {
+            "json" => return safesort_root.join("JSONs"),
+            "xml" => return safesort_root.join("XMLs"),
+            _ => return safesort_root.join("Other").join("Review Needed"),
         }
     }
-    path
+
+    if matches!(purpose, FilePurpose::Unknown) {
+        return safesort_root.join("Other").join("Review Needed");
+    }
+
+    // Known owner/project/client/book wins: owner first, extension second,
+    // optional purpose subfolder third.
+    if let Some(o) = owner {
+        let mut path = safesort_root
+            .join(clean_owner_folder_name(&o.canonical))
+            .join(ext);
+
+        if let Some(sub) = subcategory_for(purpose) {
+            for part in sub.split('/') {
+                path = path.join(part);
+            }
+        }
+
+        return path;
+    }
+
+    // Unknown but safe files fall back to simple extension/type folders directly
+    // under ./safesort, for example safesort/PDFs, safesort/MP3s, safesort/JPGs.
+    safesort_root.join(fallback_folder(extension))
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────
@@ -278,9 +281,13 @@ mod tests {
         assert_eq!(ext_group("jpeg"), "JPGs");
         assert_eq!(ext_group("webp"), "WEBPs");
         assert_eq!(ext_group("mp3"), "MP3s");
+        assert_eq!(ext_group("wav"), "WAVs");
         assert_eq!(ext_group("mp4"), "MP4s");
+        assert_eq!(ext_group("mov"), "MOVs");
         assert_eq!(ext_group("docx"), "DOCX");
         assert_eq!(ext_group("zip"), "ZIPs");
+        assert_eq!(ext_group("json"), "JSONs");
+        assert_eq!(ext_group("txt"), "TXTs");
         assert_eq!(ext_group("epub"), "EPUB");
         assert_eq!(ext_group("unknown_ext"), "Other");
     }
@@ -349,38 +356,61 @@ mod tests {
     fn test_unknown_png_goes_to_fallback_pngs() {
         let dest = local_destination(&root(), None, FilePurpose::Image, "png");
         let s = dest.to_string_lossy();
-        // No owner → extension fallback → safesort/PNGs/ (not Other/PNGs)
         assert!(s.ends_with("/PNGs"), "expected safesort/PNGs, got: {s}");
         assert!(!s.contains("Other"), "should not be under Other, got: {s}");
     }
 
     #[test]
-    fn test_sensitive_doc_goes_to_sensitive_documents() {
+    fn test_unknown_safe_pdf_goes_flat_pdfs() {
+        let dest = local_destination(&root(), None, FilePurpose::Document, "pdf");
+        let s = dest.to_string_lossy();
+        assert!(s.ends_with("/PDFs"), "expected safesort/PDFs, got: {s}");
+        assert!(
+            !s.contains("Reports"),
+            "generic PDFs should not go to Reports, got: {s}"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_doc_goes_to_sensitive_info() {
         let dest = local_destination(&root(), None, FilePurpose::SensitiveDocument, "pdf");
         let s = dest.to_string_lossy();
-        assert!(s.contains("SensitiveDocuments"), "got: {s}");
-        assert!(s.contains("PDFs"), "got: {s}");
+        assert!(s.contains("SensitiveInfo"), "got: {s}");
+        assert!(s.ends_with("/PDFs"), "got: {s}");
     }
 
     #[test]
-    fn test_audio_goes_to_audio() {
+    fn test_sensitive_txt_goes_to_sensitive_info_txts() {
+        let dest = local_destination(&root(), None, FilePurpose::SensitiveDocument, "txt");
+        let s = dest.to_string_lossy();
+        assert!(s.contains("SensitiveInfo"), "got: {s}");
+        assert!(s.ends_with("/TXTs"), "got: {s}");
+    }
+
+    #[test]
+    fn test_audio_goes_to_flat_mp3s() {
         let dest = local_destination(&root(), None, FilePurpose::Audio, "mp3");
         let s = dest.to_string_lossy();
-        assert!(s.contains("Audio"), "got: {s}");
-        assert!(s.contains("MP3s"), "got: {s}");
+        assert!(s.ends_with("/MP3s"), "got: {s}");
     }
 
     #[test]
-    fn test_video_goes_to_video() {
+    fn test_video_goes_to_flat_mp4s() {
         let dest = local_destination(&root(), None, FilePurpose::Video, "mp4");
         let s = dest.to_string_lossy();
-        assert!(s.contains("Video"), "got: {s}");
-        assert!(s.contains("MP4s"), "got: {s}");
+        assert!(s.ends_with("/MP4s"), "got: {s}");
     }
 
     #[test]
-    fn test_code_goes_to_review_needed() {
-        let dest = local_destination(&root(), None, FilePurpose::Code, "js");
+    fn test_loose_json_goes_flat_jsons() {
+        let dest = local_destination(&root(), None, FilePurpose::Code, "json");
+        let s = dest.to_string_lossy();
+        assert!(s.ends_with("/JSONs"), "got: {s}");
+    }
+
+    #[test]
+    fn test_script_stays_review_needed() {
+        let dest = local_destination(&root(), None, FilePurpose::Code, "sh");
         let s = dest.to_string_lossy();
         assert!(s.contains("Review Needed"), "got: {s}");
     }
@@ -403,12 +433,10 @@ mod tests {
     }
 
     #[test]
-    fn test_receipts_fixed_category() {
+    fn test_receipts_fallback_to_extension_without_owner() {
         let dest = local_destination(&root(), None, FilePurpose::Receipt, "pdf");
         let s = dest.to_string_lossy();
-        assert!(s.contains("Receipts"), "got: {s}");
-        // Should NOT contain an owner-derived folder
-        assert!(!s.contains("Other"), "got: {s}");
+        assert!(s.ends_with("/PDFs"), "got: {s}");
     }
 
     #[test]
@@ -425,15 +453,29 @@ mod tests {
 
     #[test]
     fn test_no_path_traversal() {
-        // An adversarial owner name should not escape the safesort root
         let safe_root = PathBuf::from("/tmp/test/safesort");
         let evil = owner("../../etc/passwd", OwnerCategory::Unknown);
         let dest = local_destination(&safe_root, Some(&evil), FilePurpose::Image, "png");
-        let s = dest.to_string_lossy();
-        // clean_owner_folder_name strips dots, so ".." becomes empty → "Other"
         assert!(
-            !s.contains("etc") && !s.contains("passwd"),
-            "Path traversal must be prevented, got: {s}"
+            dest.starts_with(&safe_root),
+            "Path traversal must be prevented, got: {}",
+            dest.display()
         );
+        let relative = dest.strip_prefix(&safe_root).unwrap();
+        for part in relative.components() {
+            let text = part.as_os_str().to_string_lossy();
+            assert!(
+                !text.contains(".."),
+                "Path component must not contain .., got: {text}"
+            );
+            assert!(
+                !text.contains('/'),
+                "Path component must not contain slash, got: {text}"
+            );
+            assert!(
+                !text.contains('\\'),
+                "Path component must not contain backslash, got: {text}"
+            );
+        }
     }
 }

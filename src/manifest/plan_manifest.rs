@@ -15,6 +15,66 @@ fn is_script_extension(path_str: &str) -> bool {
     matches!(ext, "sh" | "bat" | "cmd" | "ps1" | "bash" | "zsh" | "fish")
 }
 
+/// Returns true when a code/config-looking filename is too risky to move
+/// through extension fallback. This protects real project configs while
+/// allowing harmless loose files like sls-logs.json to go to safesort/JSONs.
+fn is_dangerous_config_path(path_str: &str) -> bool {
+    let lower = path_str.to_lowercase();
+
+    if lower.contains("/user.js/")
+        || lower.contains("/.git/")
+        || lower.contains("/node_modules/")
+        || lower.contains("/target/")
+        || lower.contains("/vendor/")
+    {
+        return true;
+    }
+
+    let name = std::path::Path::new(&lower)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+
+    matches!(
+        name,
+        ".env"
+            | "package.json"
+            | "package-lock.json"
+            | "pnpm-lock.yaml"
+            | "yarn.lock"
+            | "cargo.toml"
+            | "cargo.lock"
+            | "composer.json"
+            | "composer.lock"
+            | "pyproject.toml"
+            | "tsconfig.json"
+            | ".gitattributes"
+            | ".travis.yml"
+            | "docker-compose.yml"
+            | "docker-compose.yaml"
+            | "readme.md"
+            | "license"
+    ) || name.contains("credential")
+        || name.contains("secret")
+        || name.contains("private_key")
+        || name.contains("apikey")
+        || name.contains("api_key")
+        || name.contains("token")
+        || name.contains("auth")
+}
+
+fn is_safe_code_extension_fallback(path_str: &str, planned_destination: &str) -> bool {
+    let lower = path_str.to_lowercase();
+    let ext = std::path::Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    matches!(ext, "json" | "xml")
+        && planned_destination.contains("/safesort/")
+        && !is_dangerous_config_path(path_str)
+}
+
 /// Build a dry-run rollback manifest from a set of placement recommendations.
 ///
 /// Only SAFE_CANDIDATE items with NONE or LOW impact are included as move
@@ -118,7 +178,8 @@ pub fn build_plan_manifest(
         // Assisted mode: lower confidence bar, more file types allowed.
         // Sensitive docs allowed in local mode (go to SensitiveDocuments/) but not legacy mode.
         let path_str = rec.file_path.to_string_lossy();
-        let dest_is_sensitive_docs = planned_destination.contains("SensitiveDocuments");
+        let dest_is_sensitive_docs = planned_destination.contains("SensitiveInfo")
+            || planned_destination.contains("SensitiveDocuments");
 
         // Extension-fallback destinations are direct children of the safesort root
         // (e.g., "safesort/PDFs", "safesort/Audio") with no owner segment.
@@ -135,10 +196,13 @@ pub fn build_plan_manifest(
             && matches!(rec.safety_level, SafetyLevel::SafeCandidate)
             && impact_ok
             && (rec.confidence.value() >= 60 || dest_is_extension_fallback)
-            && !matches!(rec.purpose, FilePurpose::Code | FilePurpose::Unknown)
-            // Sensitive docs only allowed in assisted when in local mode (SensitiveDocuments/)
+            && !matches!(rec.purpose, FilePurpose::Unknown)
+            && (!matches!(rec.purpose, FilePurpose::Code)
+                || is_safe_code_extension_fallback(&path_str, &planned_destination))
+            // Sensitive docs only allowed in assisted when in local mode (SensitiveInfo/)
             && (!matches!(rec.purpose, FilePurpose::SensitiveDocument) || dest_is_sensitive_docs)
             && !is_script_extension(&path_str)
+            && !is_dangerous_config_path(&path_str)
             && !path_str.ends_with(".part")
             && !dest_is_review_needed
             && !planned_destination.contains("(no destination computed)");
