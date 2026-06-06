@@ -147,18 +147,29 @@ Remaining items for full apply:
 - [ ] Automatic manifest backup
 - [ ] Manifest signing (detect tampering)
 
-## Phase 5: Carefully Gated Apply Command
+## Phase 5: Guarded Apply with Freeze-State Rollback ✅ COMPLETE
 
-**Status**: Stub complete. Infrastructure ready. Real moves not yet implemented.
+**Status**: Implemented in v0.6.0. Real file movement enabled — fully gated.
+
+> **Safety invariants unchanged.** LOCKED / REVIEW / MEDIUM / HIGH / CRITICAL items are never moved.
+> Apply cannot run without all 4 explicit flags + valid manifest + passing preflight.
 
 - [x] Both-flag requirement (`--confirm` + `--i-understand-this-moves-files`)
-- [x] Preflight runs before apply even checks flags
-- [x] "Still disabled in MVP" safety refusal
-- [ ] Atomic filesystem moves with immediate rollback on failure
-- [ ] Per-item confirmation mode
-- [ ] Apply with automatic rollback on failure
-- [ ] Progress bar during apply
-- [ ] Post-apply verification scan
+- [x] Preflight runs before any file is touched
+- [x] `--backup` flag required — freeze-state copy of every source before move
+- [x] `--apply-safe-only` flag required — only `auto_plan_eligible` entries move
+- [x] Backup checksum verified before move
+- [x] Destination parent directory created automatically
+- [x] `fs::rename` for atomic-ish move (only in `src/apply/engine.rs`)
+- [x] Destination checksum verified after move
+- [x] Final destination path = planned_dir + source filename (never truncates at dir)
+- [x] `--rollback-output` writes freeze-state receipt with per-file checksums
+- [x] `safesort rollback <receipt>` — restores from backup; never removes directories
+- [x] `safesort apply-status <receipt>` — read-only status display
+- [x] Safe zone detection fix: Downloads files not penalized for inside_project
+- [x] Dry-run works without any confirmation flags — shows plan, moves nothing
+- [x] 277 tests passing (10 new destination-resolution tests, 5 new doctor tests)
+- [x] Manual verification: 15 demo files moved, 15 restored, no real user files touched
 
 ## Phase 6: AI Summary Integration
 

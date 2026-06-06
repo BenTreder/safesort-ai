@@ -2837,15 +2837,85 @@ fn test_project_marker_detected_even_with_default_excludes() {
 }
 
 #[test]
-fn test_doctor_shows_apply_disabled() {
+fn test_doctor_shows_version_060() {
     use assert_cmd::Command;
     use predicates::prelude::*;
-
-    let mut cmd = Command::cargo_bin("safesort").unwrap();
-    cmd.arg("doctor")
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("DISABLED"));
+        .stdout(predicate::str::contains("0.6.0"));
+}
+
+#[test]
+fn test_doctor_says_guarded_apply_only() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GUARDED APPLY ONLY"));
+}
+
+#[test]
+fn test_doctor_does_not_say_movement_disabled() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("doctor")
+        .assert()
+        .success()
+        // "DISABLED" must not appear in the movement section; GUARDED APPLY ONLY replaced it
+        .stdout(predicate::str::contains("Real file movement:  DISABLED").not());
+}
+
+#[test]
+fn test_doctor_scan_plan_organize_preflight_move_nothing() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    let out = Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("doctor")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("scan:                no movement"),
+        "scan must say no movement"
+    );
+    assert!(
+        text.contains("plan:                no movement"),
+        "plan must say no movement"
+    );
+    assert!(
+        text.contains("organize:            no movement by itself"),
+        "organize must say no movement by itself"
+    );
+    assert!(
+        text.contains("preflight:           no movement"),
+        "preflight must say no movement"
+    );
+}
+
+#[test]
+fn test_doctor_apply_requires_explicit_flags_and_backup() {
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "requires manifest + preflight + backup + explicit flags",
+        ));
 }
 
 #[test]

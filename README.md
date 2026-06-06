@@ -29,14 +29,29 @@ SafeSort **never** places files directly into live website roots by default. It 
 ## Quick Start
 
 ```bash
-# Premium guided workflow (recommended)
-safesort organize --path ~/Downloads
+# Premium guided workflow — generates a manifest, moves nothing
+safesort organize --path ~/Downloads --mode safe-autopilot --manifest-output manifest.json
 
-# Or step by step:
-safesort scan --path ~/Downloads
-safesort plan --path ~/Downloads --mode guided
-safesort manifest --path ~/Downloads --output manifest.json
+# Validate the manifest before any move
 safesort preflight manifest.json
+
+# Preview exactly what would move (no files touched)
+safesort apply manifest.json --dry-run
+
+# Real guarded apply — moves only SAFE + auto-eligible files, requires all flags
+safesort apply manifest.json \
+  --confirm \
+  --i-understand-this-moves-files \
+  --backup \
+  --apply-safe-only \
+  --backup-dir ./backup \
+  --rollback-output rollback.json
+
+# Inspect what was moved
+safesort apply-status rollback.json
+
+# Undo everything — restores files from freeze-state backup
+safesort rollback rollback.json
 ```
 
 ## Organization Modes
@@ -67,7 +82,7 @@ Creates a question queue for uncertain files (80–94% confidence). Asks where q
 ```bash
 safesort plan --path ~/Downloads --mode safe-autopilot
 ```
-Only auto-plans files with ≥95% confidence (GREEN) **and NONE/LOW impact**. Never auto-plans items with MEDIUM, HIGH, or CRITICAL impact. Never moves LOCKED or REVIEW items. Only uses safe staging destinations. Produces a plan only — apply is disabled.
+Only auto-plans files with ≥95% confidence (GREEN) **and NONE/LOW impact**. Never auto-plans items with MEDIUM, HIGH, or CRITICAL impact. Never moves LOCKED or REVIEW items. Only uses safe staging destinations. Produces a manifest — real moves require `safesort apply` with all required safety flags.
 
 ### Locked-Down Mode
 ```bash
@@ -77,15 +92,28 @@ Extra conservative. Caps confidence at 80. Never recommends automatic movement. 
 
 ## Key Principles
 
-### Read-Only First
+### Movement Model
 
-**This build is 100% read-only.** It does NOT:
-- Move, copy, or delete files
+`organize`, `scan`, `plan`, `manifest`, and `preflight` are **always read-only** — they never move, copy, or delete anything.
+
+`apply` is the **only command that can move files**, and it is heavily guarded:
+
+- Requires a SafeSort-generated manifest (`dry_run_only=true`)
+- Runs preflight (all 8 checks must pass)
+- Requires `--backup` — every file is freeze-copied before moving
+- Requires `--apply-safe-only` — only `auto_plan_eligible` entries move
+- Requires `--confirm` and `--i-understand-this-moves-files`
+- Verifies backup checksum before the move
+- Verifies destination checksum after the move
+- **LOCKED / REVIEW / MEDIUM / HIGH / CRITICAL items never move**
+
+`rollback` restores files from the freeze-state backup. It never performs new organize moves.
+
+SafeSort AI still does NOT:
 - Rename or chmod/chown anything
 - Edit config files, systemd units, or cron jobs
-- Touch real user files except to create the Rust project itself
-
-The `apply` command exists as a stub that refuses to run.
+- Overwrite existing destination files
+- Remove directories
 
 ### Impact Visibility
 
@@ -341,17 +369,40 @@ Preflight checks (all must pass):
 - All planned destinations are safe (no system paths, no live-site paths)
 
 ### `safesort apply`
-**Disabled in this safety-first MVP build — real file movement is intentionally not implemented.**
+**Guarded file movement — the only command that moves files.**
 
-`apply` requires both acknowledgement flags, runs preflight internally, then refuses with:
-> "Apply preflight passed, but real file movement is still disabled in this MVP build."
+Moves only `auto_plan_eligible` entries (SAFE, NONE/LOW impact, ≥95% confidence). Requires all four safety flags. Runs preflight before any move. Creates a freeze-state backup of every source file before moving it.
 
 ```bash
-# Refuses without both flags:
-safesort apply manifest.json
+# Preview what would move — no files touched
+safesort apply manifest.json --dry-run
 
-# Runs preflight then refuses (nothing moved):
-safesort apply manifest.json --confirm --i-understand-this-moves-files
+# Real apply — all flags required
+safesort apply manifest.json \
+  --confirm \
+  --i-understand-this-moves-files \
+  --backup \
+  --apply-safe-only \
+  --backup-dir ./my-backup \
+  --rollback-output rollback.json
+```
+
+Without all four flags (`--confirm`, `--i-understand-this-moves-files`, `--backup`, `--apply-safe-only`), apply prints missing flags and exits without moving anything.
+
+### `safesort apply-status`
+Read-only status display of a previous apply run.
+
+```bash
+safesort apply-status rollback.json
+```
+
+### `safesort rollback`
+Restore all moved files from their freeze-state backups. Never performs new organize moves. Never removes directories.
+
+```bash
+safesort rollback rollback.json
+# With overwrite if source path already has a file:
+safesort rollback rollback.json --confirm-overwrite-rollback
 ```
 
 ## Examples

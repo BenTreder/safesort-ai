@@ -26,7 +26,7 @@ Before any file could ever be moved, SafeSort AI requires:
 
 ### 3. Dry-Run First
 
-Every operation starts as a dry run. The user sees exactly what *would* happen before anything *does* happen. The `apply` command remains disabled.
+Every operation starts as a dry run. The user sees exactly what *would* happen before anything *does* happen. `apply --dry-run` shows the full move plan without touching any file. Real moves require all four explicit safety flags plus a freeze-state backup.
 
 ### 4. Impact Before Action
 
@@ -179,11 +179,19 @@ This pattern ensures that by the time apply is ever enabled:
 - No safety gate has been bypassed
 - The checksum infrastructure is proven and tested before it matters
 
-### Hardened apply (MVP — still disabled):
-Even when both `--confirm` and `--i-understand-this-moves-files` are provided, apply runs preflight internally, then refuses with:
-> "Apply preflight passed, but real file movement is still disabled in this MVP build."
+### Guarded apply (v0.6.0 — enabled with all safety flags):
+Apply requires all of the following before moving any file:
+1. A valid SafeSort manifest (`dry_run_only=true`)
+2. All 8 preflight checks must pass
+3. `--backup` — freeze-state copy of source before move
+4. `--apply-safe-only` — only `auto_plan_eligible` entries
+5. `--confirm` and `--i-understand-this-moves-files`
+6. Backup checksum verified before move
+7. Destination checksum verified after move
 
-This means apply is demonstrably safe: it has all the gates, it just refuses to pull the trigger.
+**LOCKED / REVIEW / MEDIUM / HIGH / CRITICAL items are never moved, regardless of flags.**
+
+`apply --dry-run` previews the full plan without touching any file. No flags, backup, or receipt required for dry-run.
 
 ## Rollback Manifest (Phase 3 — Implemented)
 
@@ -203,12 +211,11 @@ safesort manifest --path ~/Downloads --output manifest.json
 safesort plan --path ~/Downloads --mode guided --manifest-output manifest.json
 ```
 
-### Future rollback design (Phase 4):
-When apply is eventually enabled, the workflow will be:
-1. **Manifest phase** (current): SHA-256 checksums + planned destinations, nothing moved
-2. **Verify phase**: Confirm checksums still match before applying
-3. **Apply phase**: Atomic moves with full manifest audit trail
-4. **Rollback command**: `safesort rollback <manifest>` undoes all moves
+### Apply workflow (v0.6.0):
+1. **Manifest phase**: SHA-256 checksums + planned destinations, nothing moved
+2. **Preflight phase**: 8-check verification that all conditions are still met
+3. **Apply phase**: Freeze-state backup → move → checksum verification per file
+4. **Rollback**: `safesort rollback <receipt>` restores from backup; never removes directories
 
 ## The "Workspace Overlay" Concept
 
@@ -275,20 +282,20 @@ In this Phase 1+ / Phase 2 foundation build:
 | Profile detection | ✅ Enabled |
 | Folder structure recommendations | ✅ Enabled |
 | Terminal/JSON/Markdown reports | ✅ Enabled |
-| `apply` command | 🔒 Stub only — refuses to run ("Nothing was moved.") |
-| Safe Autopilot | 🟡 Plan-only — produces plan, never moves files |
-| Guided Review | 🟡 Plan-only — question queue only, never moves files |
+| `apply` command | ✅ Guarded apply — requires all 4 flags + backup + preflight |
+| `apply --dry-run` | ✅ Always safe — shows plan, moves nothing, no flags required |
+| `apply-status` | ✅ Read-only status display |
+| `rollback` | ✅ Restores from backup; never removes directories |
+| Safe Autopilot | 🟡 Plan eligibility only — does not move by itself |
+| Guided Review | 🟡 Question/review workflow only — does not move |
 | Dependency graph | 🔵 Foundation only — analysis, not wired to apply |
 | Demo fixture path | `./safesort_demo/` |
-| File moving | 🔒 Disabled |
-| File deletion | 🔒 Disabled |
 | Direct live-site moves | 🔒 Always disabled |
-| SHA-256 checksum engine | ✅ Enabled (read-only) |
+| File deletion | 🔒 Disabled — rollback removes only the exact moved file, never dirs |
+| LOCKED/REVIEW/MEDIUM/HIGH/CRITICAL moves | 🔒 Always disabled, no flag can override |
+| SHA-256 checksum engine | ✅ Enabled — manifest, backup, and destination all verified |
 | Rollback manifest (dry-run) | ✅ Enabled — `safesort manifest` / `--manifest-output` |
 | `safesort preflight <MANIFEST>` | ✅ Enabled — validates all safety gates, moves nothing |
-| Hardened apply stub | ✅ Enabled — requires both flags, runs preflight, then refuses |
-| Rollback manifest apply | 🔒 Phase 4 — apply disabled |
-| Checksum verification on apply | ✅ Implemented in preflight (Phase 3) |
 | AI summary integration | 🔒 Phase 6 |
 | Tauri desktop GUI | 🔒 Phase 7 |
 

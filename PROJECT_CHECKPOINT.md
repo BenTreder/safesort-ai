@@ -1,85 +1,68 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 4 MVP Polish — organize command, doctor upgrade, DEFAULT_HEAVY_EXCLUDES)
-**Version**: 0.5.0
-**Phase**: 4 MVP polish complete — `organize` premium workflow, upgraded doctor, 10 new tests
+**Date**: 2026-06-05 (Phase 5 complete — v0.6.0 Guarded Apply)
+**Version**: 0.6.0
+**Phase**: Phase 5 complete — guarded apply with freeze-state rollback
 
 ## Safety Audit Summary (2026-06-05)
 
-- **227 tests passing** (62 lib + 50 bin + 23 placement + 92 safety)
-- **apply still disabled** — prints "Nothing was moved." unconditionally
-- **Safe Autopilot still plan-only** — no moves, no file operations
-- **Guided Review still plan-only** — question queue only, no moves
-- **No destructive filesystem calls** anywhere in src/ (verified by grep)
+- **281 tests passing** (62 lib + 50 bin + 23 placement + 146 safety)
+- **apply is GUARDED, not disabled** — real moves enabled with all safety flags
+- **Safe Autopilot** — plan eligibility only; does not move files by itself
+- **Guided Review** — question/review workflow only; does not move files
+- **No destructive filesystem calls** outside `src/apply/engine.rs` (verified by grep)
 - **Demo fixture path**: `./safesort_demo/` (gitignored)
-- **Workspace Overlay**: preferred for active projects
+- **Manual verification**: 15 demo files moved, 15 files restored, no real user files touched
 
-### Phase 2 stabilization: impact visibility (landed 2026-06-05)
-
-Impact level is now derived from evidence and surfaced throughout the tool:
+## Phase 5: Guarded Apply (v0.6.0)
 
 | Component | Status |
 |---|---|
-| `impact_from_evidence()` in `reports/mod.rs` | ✅ |
-| `ItemResult.impact_level` field on every scan item | ✅ |
-| `SafetySummary` impact counts (Critical/High/Medium/Low/None) | ✅ |
-| Terminal scan output — impact summary block | ✅ |
-| Terminal scan output — impact inline per example | ✅ |
-| `PlacementRecommendation.impact_level` field | ✅ |
-| Plan output — impact icon + level per recommendation | ✅ |
-| Safe Autopilot explicit impact gate (MEDIUM+ excluded) | ✅ |
-| Fake-systemd `scan_dir` for explain command | ✅ |
-| 7 new impact-focused tests | ✅ |
-| `.gitignore` ignores `target/` and `safesort_demo/` | ✅ |
-| **Read-only custom rule files (v0.3.0)** | |
-| `--rule-file <FILE>` on scan, plan, explain | ✅ |
-| `src/rules_file/` module (schema, loader, validation) | ✅ |
-| Alias injection into OwnershipDetector | ✅ |
-| Protected paths → LOCKED + child inheritance | ✅ |
-| Custom staging destinations with safety validation | ✅ |
-| Risky destination auto-rejection | ✅ |
-| `PlacementRecommendation.rule_note` field | ✅ |
-| Explain shows rule-file influence | ✅ |
-| Rules never bypass safety / never persist / never auto-load | ✅ |
-| 15 new rule-file tests | ✅ |
-| `examples/safesort-rules.toml` annotated example | ✅ |
-| **Depth and exclude controls (v0.2.4)** | |
-| `--depth <N>` on scan and plan | ✅ |
-| `--exclude <PATTERN>` (repeatable) on scan and plan | ✅ |
-| `SafetySummary.skipped` count | ✅ |
-| SKIPPED line in terminal scan output | ✅ |
-| SKIPPED line in plan placement summary | ✅ |
-| Excluded items never classified or auto-plan eligible | ✅ |
-| 7 new depth/exclude tests | ✅ |
-| **Parent-risk inheritance (v0.2.3)** | |
-| `EvidenceKind::InheritedRisk` | ✅ |
-| `LIVE_SITE_FOLDER_NAMES` in config | ✅ |
-| `detect_sensitive_in_dir` — dirs containing .env → LOCKED | ✅ |
-| Second-pass inheritance in `Scanner::scan` | ✅ |
-| `public_html/index.php` → REVIEW/HIGH (was SAFE) | ✅ |
-| `ImportantApp/config.yml` → REVIEW/HIGH (was SAFE) | ✅ |
-| 6 new inheritance tests (total 153 passing) | ✅ |
+| `src/apply/engine.rs` — core apply/rollback/status engine | ✅ |
+| `src/apply/receipt.rs` — `ApplyReceipt`, `RollbackEntry`, `RollbackStatus` | ✅ |
+| `src/apply/mod.rs` — module wiring | ✅ |
+| Freeze-state backup before every move (`fs::copy`) | ✅ |
+| Backup checksum verification | ✅ |
+| Destination parent directory creation | ✅ |
+| `fs::rename` atomic move | ✅ |
+| Destination checksum verification | ✅ |
+| Final destination = planned_dir + source filename | ✅ |
+| Never appends filename twice if already present | ✅ |
+| `--rollback-output` writes per-file receipt | ✅ |
+| `safesort rollback <receipt>` — restore from backup | ✅ |
+| Rollback never removes directories | ✅ |
+| Rollback refuses if dest path is a directory | ✅ |
+| `safesort apply-status <receipt>` — read-only | ✅ |
+| `safesort apply --dry-run` — no flags required | ✅ |
+| Safe zone files skip inside_project penalty | ✅ |
+| Preflight runs before every real apply | ✅ |
+| All 4 flags required for real apply | ✅ |
+| LOCKED/REVIEW/MEDIUM/HIGH/CRITICAL never moved | ✅ |
+| 277 tests passing before metadata update | ✅ |
+| 281 tests passing after doctor/metadata tests | ✅ |
 
-**Impact is display-only. The tool remains read-only. Nothing is moved.**
+### Apply Safety Gates (all required)
 
-### Phase 2 dependency graph (foundation)
+1. Valid SafeSort manifest (`dry_run_only=true`)
+2. All 8 preflight checks pass
+3. `--backup` flag (freeze-state copy before every move)
+4. `--apply-safe-only` flag (only `auto_plan_eligible` entries)
+5. `--confirm` flag
+6. `--i-understand-this-moves-files` flag
+7. Backup checksum verified before move
+8. Destination checksum verified after move
 
-The `src/graph/` module provides:
+### What Changed in v0.6.0
 
-| Component | Status |
-|---|---|
-| `DependencyGraph` node/edge model | ✅ |
-| `ImpactLevel` enum (None/Low/Medium/High/Critical) | ✅ |
-| `analyze_impact_from_evidence` | ✅ |
-| `analyze_project_impact` (.git/Cargo.toml → Medium+) | ✅ |
-| `analyze_sensitive_folder_impact` (.env → Critical) | ✅ |
-| `SystemdDetector::scan_dir` for fake-systemd fixtures | ✅ |
-| Service-bound impact in `explain` command | ✅ |
-| Cross-reference to apply pipeline | ⬜ Phase 5 |
+- `src/apply/engine.rs` — full apply engine with freeze-state backup
+- `src/apply/receipt.rs` — `final_destination_path` field added (`serde(default)`)
+- `src/scan/classifier.rs` — safe zone detection fix (scan_root named Downloads/Desktop)
+- `src/placement/engine.rs` — safe zone files skip inside_project penalty
+- `src/app.rs` — dry-run flags, guarded apply path, doctor output update
+- `Cargo.toml` — version 0.6.0
+- `tests/safety_tests.rs` — 19 new apply/rollback/dest/doctor tests
 
-**The dependency graph explains what would break — it does not move anything.**
-
-## What Was Built
+## What Was Built (Cumulative)
 
 ### Phase 1: Read-Only Scanner (v0.1.0)
 Complete safety-first scanner with 7 detectors, classification, and profiling.
@@ -87,193 +70,40 @@ Complete safety-first scanner with 7 detectors, classification, and profiling.
 ### Phase 1+: Smart Placement Engine (v0.2.0)
 Premium placement intelligence on top of safety classification.
 
-#### New Commands
+### Phase 2: Dependency Graph + Impact Visibility (v0.3.0)
+Impact levels, rule files, depth/exclude controls, parent-risk inheritance.
 
-| Command | Description |
-|---|---|
-| `safesort plan --path <P>` | Smart placement plan (preview mode) |
-| `safesort plan --path <P> --mode guided` | Interactive guided review |
-| `safesort plan --path <P> --mode safe-autopilot` | Auto-plan ≥95% confidence |
-| `safesort scan --path <P> --mode locked-down` | Extra conservative scan |
+### Phase 3: Manifest + Preflight (v0.4.0)
+SHA-256 checksum manifest, 8-check preflight engine, hardened apply infrastructure.
 
-#### New Modules (8 files)
+### Phase 4: Organize Workflow + Doctor (v0.5.0)
+Premium `organize` workflow, upgraded doctor, auto-plan eligibility, demo fixture fix.
 
-```
-src/placement/
-  mod.rs            — Module root + re-exports
-  engine.rs         — SmartPlacementEngine (orchestrator + unit tests)
-  ownership.rs      — OwnershipDetector (brand/project + unit tests)
-  file_purpose.rs   — FilePurposeDetector (logo, banner, etc. + unit tests)
-  destination.rs    — DestinationPlanner (safe staging + unit tests)
-  confidence.rs     — ConfidenceScorer (0–100 + unit tests)
-  rules.rs          — RulesEngine (user-defined rules + unit tests)
-  question_queue.rs — QuestionQueue (guided review rendering)
-```
-
-#### Test Results
-
-```
-test result: ok. 121 total tests passing
-  39 unit tests (lib.rs)
-  39 unit tests (main.rs binary)
-  23 placement integration tests
-  20 safety integration tests
-  0 doc-tests
-```
-
-### Files Changed (14 files modified/created)
-
-**New:**
-- `src/placement/{mod,engine,ownership,file_purpose,destination,confidence,rules,question_queue}.rs`
-- `tests/placement_tests.rs`
-
-**Modified:**
-- `src/cli.rs` — Added `--mode` flag, `plan` command, `OrgMode` enum
-- `src/app.rs` — Added `cmd_plan`, `render_placement_plan`, mode organization
-- `src/main.rs` — Added `mod placement`
-- `src/lib.rs` — Added `pub mod placement`
-- `README.md` — Smart Placement Engine documentation
-- `SAFETY.md` — Safe staging, confidence gating, live-site safety
-- `ROADMAP.md` — Phase 1+ complete, Phase 2 planned
-- `PROJECT_CHECKPOINT.md` — This file
-
-### Example Output
-
-```
-$ safesort plan --path safesort_demo/Downloads --mode guided
-
-  SafeSort AI — Smart Placement Plan
-  Target: safesort_demo/Downloads
-  Mode: guided
-
-  Placement Summary:
-    Total files scanned:    20
-    🔒 Locked:              0
-    🟡 Guided review:       0
-    ⚠️  Review needed:       15
-    ⬜ Leave alone:          5
-
-  ┌─────────────────────────────────────────────
-  │ File:       .../Downloads/bentreder_logo.png
-  │ Owner:      Ben Treder Digital (BenTreder.com)
-  │ Purpose:    Logo
-  │ Type:       Image
-  │ Risk:       GREEN
-  │ Confidence: 94%
-  │ Dest:       Brand Assets → BenTreder → Logos
-  │ Path:       ~/Workspace/06_Business/Brand Assets/BenTreder/Logos
-  │ Action:     GUIDED REVIEW
-  └─────────────────────────────────────────────
-
-  Nothing was moved.
-```
-
-### Commands to Try
-
-```bash
-# Build
-cargo build --release
-
-# Generate demo fixture with smart placement files
-./target/release/safesort demo-fixture
-
-# Smart placement plan (guided mode)
-./target/release/safesort plan --path safesort_demo/Downloads --mode guided
-
-# Safe autopilot mode
-./target/release/safesort plan --path safesort_demo/Downloads --mode safe-autopilot
-
-# Locked-down scan
-./target/release/safesort scan --path safesort_demo --mode locked-down
-
-# Export plan as JSON
-./target/release/safesort plan --path safesort_demo/Downloads --output plan.json
-
-# Run all tests
-cargo test
-```
-
-## What Is Implemented
-
-| Feature | Status |
-|---|---|
-| Read-only safety scanner | ✅ Complete |
-| 7 safety detectors | ✅ Complete |
-| Smart Placement Engine | ✅ Complete |
-| Ownership detection (15+ aliases) | ✅ Complete |
-| Purpose detection (25+ purposes) | ✅ Complete |
-| Confidence scoring (0–100) | ✅ Complete |
-| Safe staging destinations | ✅ Complete |
-| 4 organization modes | ✅ Complete |
-| Guided review question queue | ✅ Complete |
-| Rules engine (in-memory) | ✅ Complete |
-| Workspace Overlay | ✅ Complete |
-| Downloads Triage | ✅ Complete |
-| 133 passing tests | ✅ Complete |
-
-## Phase 3 MVP — Preflight, Hardened Apply, Manifest (2026-06-05)
-
-| Component | Status |
-|---|---|
-| `src/preflight/mod.rs` — 8-check preflight engine | ✅ |
-| `safesort preflight <MANIFEST>` command | ✅ |
-| Hardened `safesort apply` — requires `--confirm` + `--i-understand-this-moves-files` | ✅ |
-| Apply runs preflight internally then refuses to move | ✅ |
-| Apply still disabled — "MVP build" refusal message | ✅ |
-| 12 new tests (tests 71–82 in safety_tests.rs) | ✅ |
-| All apply tests updated to new output format | ✅ |
-
-## Phase 3 — Checksum and Rollback Manifest (2026-06-05)
-
-| Component | Status |
-|---|---|
-| `src/manifest/checksum.rs` — SHA-256 via `sha2` crate | ✅ |
-| `src/manifest/rollback.rs` — `ManifestEntry`, `RollbackManifest` | ✅ |
-| `src/manifest/plan_manifest.rs` — `build_plan_manifest()` | ✅ |
-| `src/manifest/mod.rs` — module wiring | ✅ |
-| `safesort manifest --path <PATH> [--output <FILE>]` command | ✅ |
-| `safesort plan --manifest-output <FILE>` option | ✅ |
-| `dry_run_only: true` enforced everywhere in manifest structs | ✅ |
-| Only SAFE_CANDIDATE + NONE/LOW impact in manifest entries | ✅ |
-| LOCKED/REVIEW/HIGH+ impact → `excluded_for_safety` counter | ✅ |
-| 8 new manifest tests (tests 63–70 in safety_tests.rs) | ✅ |
-| `apply` still disabled | ✅ |
+### Phase 5: Guarded Apply (v0.6.0)
+Freeze-state backup, real file movement (gated), rollback, apply-status, final path resolution.
 
 ## What Is Intentionally Disabled for Safety
 
 | Feature | Reason |
 |---|---|
-| `apply` command | Phase 5 — manifest foundation now complete |
-| File moving | Phase 5 — checksum verification ready, apply still disabled |
-| File deletion | Never without explicit consent + backup |
+| LOCKED/REVIEW/MEDIUM/HIGH/CRITICAL moves | Always disabled — no flag can override |
+| Overwriting existing destination files | Always disabled |
+| Directory removal | Rollback removes only the exact moved file, never dirs |
 | Direct live-site moves | Always disabled — staging only |
-| Rules persistence to disk | Phase 4 — needs explicit opt-in flag |
-| Rollback manifest apply | Phase 5 — manifest generation complete (dry-run only) |
-| Checksum verification on apply | Phase 5 |
+| File deletion (beyond rollback cleanup) | Always disabled |
+| chmod/chown | Never implemented |
+| systemd/cron/shell config edits | Never implemented |
+| Rules persistence to disk | Phase 4 planned |
 | AI summary integration | Phase 6 |
 | Tauri desktop GUI | Phase 7 |
 
-## Known Limitations (Phase 1+)
+## Test Results (v0.6.0)
 
-1. **Demo fixture inside project dir:** When running `demo-fixture` from within the Rust project, files inside the fixture inherit the parent project's `Cargo.toml`, triggering the `inside_project` penalty. In real usage (`~/Downloads`), this doesn't occur.
-
-2. **Systemd/Cron detectors scan real paths:** The `demo-fixture` creates fake systemd units, but detectors scan real `/etc/systemd/system` etc.
-
-3. **Rules are in-memory only:** Custom rules are lost between runs. Persistence via `~/.safesort/rules.toml` is planned for Phase 3.
-
-4. **Alias coverage:** 15+ built-in aliases cover common brands/projects. Users can add custom aliases programmatically or via future rules file.
-
-## Recommended Next Prompt
-
-For **Phase 2** (dependency graph + apply infrastructure):
 ```
-Build Phase 2 of SafeSort AI:
-- Full dependency graph of scanned paths
-- Cross-reference script/Docker/nginx references
-- Impact analysis: "Moving X would break Y, Z"
-- --depth and --exclude flags
-- --rule-file flag for custom rules TOML
-- Checksum and rollback manifest generation
-- Keep apply as a stub
-- Add tests for new features
+test result: ok. 62 passed   (lib unit tests)
+test result: ok. 50 passed   (binary integration tests)
+test result: ok. 23 passed   (placement tests)
+test result: ok. 146 passed  (safety integration tests)
+──────────────────────────────
+Total: 281 tests, 0 failed
 ```
