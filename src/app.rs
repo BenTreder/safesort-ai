@@ -1517,10 +1517,23 @@ fn cmd_apply(
             println!("  ─── Apply Summary ────────────────────────────────────────────");
             if dry_run {
                 println!("  DRY RUN complete — nothing was moved.");
-                println!(
-                    "  Would move: {} file(s)",
-                    receipt.total_moved + receipt.total_skipped
-                );
+                let would_move = receipt
+                    .entries
+                    .iter()
+                    .filter(|e| matches!(e.rollback_status, crate::apply::RollbackStatus::DryRun))
+                    .count();
+                let would_skip = receipt
+                    .entries
+                    .iter()
+                    .filter(|e| matches!(e.rollback_status, crate::apply::RollbackStatus::Skipped))
+                    .count();
+                println!("  Would move:  {} file(s)", would_move);
+                if would_skip > 0 {
+                    println!(
+                        "  Would skip:  {} file(s) (not eligible — see SKIP lines above)",
+                        would_skip
+                    );
+                }
             } else {
                 println!("  Files moved:   {}", receipt.total_moved);
                 println!("  Files skipped: {}", receipt.total_skipped);

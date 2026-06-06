@@ -50,6 +50,11 @@ pub enum FilePurpose {
     // Books / content
     BookInterior,
     BookManuscript,
+    BookCover,
+    BookKindle,
+    BookPrint,
+    // Sensitive documents
+    SensitiveDocument,
     // Media specializations
     CannabisImage,
     Unknown,
@@ -101,6 +106,10 @@ impl FilePurpose {
             Self::CoverLetter => "Cover Letter",
             Self::BookInterior => "Book Interior",
             Self::BookManuscript => "Book Manuscript",
+            Self::BookCover => "Book Cover",
+            Self::BookKindle => "Book Kindle File",
+            Self::BookPrint => "Book Print File",
+            Self::SensitiveDocument => "Sensitive Document",
             Self::CannabisImage => "Cannabis / Product Image",
             Self::Unknown => "Unknown",
         }
@@ -142,6 +151,10 @@ impl FilePurpose {
             Self::Resume => "Resumes",
             Self::CoverLetter => "Cover Letters",
             Self::BookInterior | Self::BookManuscript => "Book Drafts",
+            Self::BookCover => "Covers",
+            Self::BookKindle => "Kindle",
+            Self::BookPrint => "Print Files",
+            Self::SensitiveDocument => "Sensitive Documents",
             Self::CannabisImage => "Cannabis",
             Self::Unknown => "Unsorted",
         }
@@ -177,7 +190,7 @@ impl FilePurposeDetector {
             ),
             (
                 FilePurpose::CoverLetter,
-                &["coverletter", "cover", "letter"],
+                &["coverletter", "coverltr", "applicationletter"],
             ),
             // SOQ / proposals — before generic Proposal/Report
             (FilePurpose::Soq, &["soq", "qualifications", "ita"]),
@@ -257,8 +270,65 @@ impl FilePurposeDetector {
             (FilePurpose::Installer, &["setup", "install", "installer"]),
         ];
 
-        // Also check filename for sticker_sheet pattern (contains underscore)
         let filename_lower = filename.to_lowercase();
+
+        // Early detection: Sensitive documents (before all other checks)
+        let sensitive_keywords = [
+            "creditreport",
+            "credit_report",
+            "credit-report",
+            "boir",
+            "cp_575",
+            "cp575",
+            "irs_",
+            "wageclaim",
+            "wage_claim",
+            "wage-claim",
+            "backupcodes",
+            "backup_codes",
+            "backup-codes",
+            "recoverycodes",
+            "recovery_codes",
+            "passwordbackup",
+            "password_backup",
+            "governmentfiling",
+            "government_filing",
+        ];
+        for kw in &sensitive_keywords {
+            if filename_lower.contains(kw) {
+                return FilePurpose::SensitiveDocument;
+            }
+        }
+
+        // Early detection: Book Kindle / epub / mobi (before cover check)
+        if filename_lower.contains("kindle")
+            || ext == "epub"
+            || tokens.iter().any(|t| t == "mobi")
+        {
+            return FilePurpose::BookKindle;
+        }
+
+        // Early detection: Book Print files
+        if (filename_lower.contains("print_ready") || filename_lower.contains("printready"))
+            || (filename_lower.contains("print")
+                && ext == "pdf"
+                && (filename_lower.contains("final") || filename_lower.contains("ready")))
+        {
+            return FilePurpose::BookPrint;
+        }
+
+        // Early detection: Book Cover (image/pdf with "cover" but NOT a cover letter)
+        if filename_lower.contains("cover")
+            && !filename_lower.contains("cover_letter")
+            && !filename_lower.contains("coverletter")
+            && !filename_lower.contains("applicationletter")
+        {
+            if is_image_ext(&ext) || ext == "pdf" || ext == "epub" {
+                return FilePurpose::BookCover;
+            }
+        }
+
+        // Also check filename for sticker_sheet pattern (contains underscore)
         if filename_lower.contains("sticker_sheet")
             || filename_lower.contains("sticker-sheet")
             || (filename_lower.contains("sticker") && filename_lower.contains("sheet"))
@@ -410,6 +480,9 @@ fn is_code_ext(ext: &str) -> bool {
             | "toml"
             | "xml"
             | "sql"
+            | "bat"
+            | "cmd"
+            | "ps1"
     )
 }
 

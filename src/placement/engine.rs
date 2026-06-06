@@ -199,6 +199,12 @@ impl SmartPlacementEngine {
             inside_project,
         );
 
+        // Check if parent folder has a code-extension-like name (risky project folder).
+        let in_risky_parent_folder = Self::is_risky_parent_folder(file_path);
+        if in_risky_parent_folder && confidence.value() > 50 {
+            confidence = Confidence(50);
+        }
+
         // In locked-down mode, cap confidence at 80 (never auto-plan)
         if self.mode == OrganizationMode::LockedDown {
             if confidence.value() > 80 {
@@ -541,6 +547,23 @@ impl SmartPlacementEngine {
             let name = c.as_os_str().to_string_lossy();
             matches!(name.as_ref(), "Downloads" | "Desktop")
         })
+    }
+
+    fn is_risky_parent_folder(file_path: &Path) -> bool {
+        // If the immediate parent folder name has a code extension (e.g. "user.js"),
+        // it's a project-like folder and its children should not be auto-planned.
+        let risky_folder_extensions = ["js", "py", "ts", "rb", "go", "rs", "php", "vue", "svelte"];
+        if let Some(parent) = file_path.parent() {
+            if let Some(folder_name) = parent.file_name().and_then(|n| n.to_str()) {
+                let folder_lower = folder_name.to_lowercase();
+                for ext in &risky_folder_extensions {
+                    if folder_lower.ends_with(&format!(".{ext}")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn is_inside_project(&self, path: &Path) -> bool {

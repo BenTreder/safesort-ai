@@ -2837,7 +2837,7 @@ fn test_project_marker_detected_even_with_default_excludes() {
 }
 
 #[test]
-fn test_doctor_shows_version_060() {
+fn test_doctor_shows_version_070() {
     use assert_cmd::Command;
     use predicates::prelude::*;
     Command::cargo_bin("safesort")
@@ -2845,7 +2845,7 @@ fn test_doctor_shows_version_060() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.6.0"));
+        .stdout(predicate::str::contains("0.7.0"));
 }
 
 #[test]
@@ -4825,4 +4825,471 @@ fn test_no_real_user_folders_touched_in_dest_resolution() {
 
     assert!(src.exists(), "Source restored inside tmp");
     assert!(!final_dest.exists(), "Destination cleared inside tmp");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Downloads apply-safety filtering — v0.7.0
+// ═══════════════════════════════════════════════════════════════════
+
+// 1. "cover" alone must NOT produce CoverLetter — it must produce BookCover (image)
+#[test]
+fn test_cover_image_is_book_cover_not_cover_letter() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/Ghost_Circuit_Cover_Final.png"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(
+        rec.purpose,
+        FilePurpose::BookCover,
+        "cover image must be BookCover, not CoverLetter"
+    );
+}
+
+// 2. Explicit "coverletter" in filename should still produce CoverLetter
+#[test]
+fn test_coverletter_token_produces_cover_letter_purpose() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/SeniorDev_CoverLetter_2026.docx"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(
+        rec.purpose,
+        FilePurpose::CoverLetter,
+        "explicit coverletter must produce CoverLetter"
+    );
+}
+
+// 3. Credit report → SensitiveDocument
+#[test]
+fn test_credit_report_is_sensitive_document() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/creditreport_2026.pdf"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(rec.purpose, FilePurpose::SensitiveDocument);
+}
+
+// 4. BOIR → SensitiveDocument
+#[test]
+fn test_boir_is_sensitive_document() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/BOIR_filing_2026.pdf"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(rec.purpose, FilePurpose::SensitiveDocument);
+}
+
+// 5. Backup codes → SensitiveDocument
+#[test]
+fn test_backup_codes_is_sensitive_document() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/backup_codes_google.txt"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(rec.purpose, FilePurpose::SensitiveDocument);
+}
+
+// 6. SensitiveDocument destination contains "99_Review Needed"
+#[test]
+fn test_sensitive_document_routes_to_review_needed() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/creditreport_2026.pdf"),
+        SafetyLevel::SafeCandidate,
+    );
+    let has_review = rec.destinations.iter().any(|d| {
+        let p = d.path.to_string_lossy();
+        p.contains("99_Review Needed") || p.contains("Review Needed")
+    });
+    assert!(has_review, "SensitiveDocument must route to Review Needed, got: {:?}", rec.destinations);
+}
+
+// 7. Big Win Jerky detected as Client owner
+#[test]
+fn test_big_win_jerky_is_client_owner() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/Big_Win_Jerky_Onboarding_DRAFT.pdf"),
+        SafetyLevel::SafeCandidate,
+    );
+    let owner_name = rec.owner.as_ref().map(|o| o.display.as_str()).unwrap_or("(none)");
+    assert!(
+        owner_name.contains("Big Win Jerky") || owner_name.contains("Big Win"),
+        "Big Win Jerky must be detected as owner, got: {}",
+        owner_name
+    );
+}
+
+// 8. Big Win Seasonings detected as Client owner
+#[test]
+fn test_big_win_seasonings_is_client_owner() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/Big_Win_Seasonings_Logo_v2.png"),
+        SafetyLevel::SafeCandidate,
+    );
+    let owner_name = rec.owner.as_ref().map(|o| o.display.as_str()).unwrap_or("(none)");
+    assert!(
+        owner_name.contains("Big Win Seasonings") || owner_name.contains("Big Win"),
+        "Big Win Seasonings must be detected as owner, got: {}",
+        owner_name
+    );
+}
+
+// 9. The Ghost Circuit book title detection
+#[test]
+fn test_ghost_circuit_book_title_detected() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/The_Ghost_Circuit_Cover_Final.png"),
+        SafetyLevel::SafeCandidate,
+    );
+    let owner_name = rec.owner.as_ref().map(|o| o.display.as_str()).unwrap_or("(none)");
+    assert!(
+        owner_name.contains("Ghost Circuit"),
+        "Ghost Circuit title must be detected, got: {}",
+        owner_name
+    );
+}
+
+// 10. Noodles Big Slurp Adventure title detection
+#[test]
+fn test_noodles_book_title_detected() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/noodles_big_slurp_adventure_kdp.pdf"),
+        SafetyLevel::SafeCandidate,
+    );
+    let owner_name = rec.owner.as_ref().map(|o| o.display.as_str()).unwrap_or("(none)");
+    assert!(
+        owner_name.contains("Noodles"),
+        "Noodles book title must be detected, got: {}",
+        owner_name
+    );
+}
+
+// 11. "no destination computed" entry must have auto_plan_eligible=false in manifest
+#[test]
+fn test_manifest_no_destination_computed_not_eligible() {
+    use assert_cmd::Command;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let src = tmp.path().join("orphan.txt");
+    fs::write(&src, "test").unwrap();
+    let dest = tmp.path().join("(no destination computed)");
+
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, None, 4);
+    let manifest_path = tmp.path().join("manifest.json");
+    fs::write(&manifest_path, manifest).unwrap();
+
+    // Preflight should reject "no destination computed"
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("preflight")
+        .arg(manifest_path.to_str().unwrap())
+        .assert()
+        .failure();
+}
+
+// 12. "99_Review Needed" destination must be blocked from auto_plan_eligible
+#[test]
+fn test_manifest_review_needed_dest_not_auto_eligible() {
+    use safesort_ai::manifest::plan_manifest::build_plan_manifest;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::SafeAutopilot);
+    // creditreport → SensitiveDocument → Review Needed destination
+    let items = vec![(
+        std::path::PathBuf::from("/home/user/Downloads/creditreport_full_2026.pdf"),
+        SafetyLevel::SafeCandidate,
+    )];
+    let result = engine.run(&items);
+    // auto_plan_eligible must be 0 — Review Needed destinations must not be eligible
+    assert_eq!(
+        result.summary.auto_plan_eligible, 0,
+        "Review Needed destination must not be auto_plan_eligible"
+    );
+}
+
+// 13. SensitiveDocument is never auto_plan_eligible even with high confidence
+#[test]
+fn test_sensitive_document_never_auto_plan_eligible() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::SafeAutopilot);
+    let items = vec![(
+        std::path::PathBuf::from("/home/user/Downloads/backup_codes_2fa.txt"),
+        SafetyLevel::SafeCandidate,
+    )];
+    let result = engine.run(&items);
+    assert_eq!(
+        result.summary.auto_plan_eligible, 0,
+        "SensitiveDocument must never be auto_plan_eligible"
+    );
+}
+
+// 14. File inside risky parent folder (name ends with .js) should not be auto-plan eligible
+#[test]
+fn test_file_in_project_like_folder_not_auto_eligible() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::SafeAutopilot);
+    // "user.js" is a folder name ending in .js — risky parent
+    let items = vec![(
+        std::path::PathBuf::from("/home/user/Downloads/user.js/index.js"),
+        SafetyLevel::SafeCandidate,
+    )];
+    let result = engine.run(&items);
+    assert_eq!(
+        result.summary.auto_plan_eligible, 0,
+        "File inside risky parent folder must not be auto_plan_eligible"
+    );
+}
+
+// 15. BookCover routes to Books/{owner}/Covers destination
+#[test]
+fn test_book_cover_routes_to_books_covers() {
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/Ghost_Circuit_Cover_Final.png"),
+        SafetyLevel::SafeCandidate,
+    );
+    let has_covers_dest = rec.destinations.iter().any(|d| d.path.to_string_lossy().contains("Covers"));
+    assert!(has_covers_dest, "BookCover must route to a Covers destination, got: {:?}", rec.destinations);
+}
+
+// 16. BookKindle (.epub) routes to Books/{owner}/Kindle destination
+#[test]
+fn test_book_kindle_epub_routes_to_kindle() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/Ghost_Circuit_final.epub"),
+        SafetyLevel::SafeCandidate,
+    );
+    assert_eq!(rec.purpose, FilePurpose::BookKindle, "epub must be BookKindle");
+    let has_kindle_dest = rec.destinations.iter().any(|d| d.path.to_string_lossy().contains("Kindle"));
+    assert!(has_kindle_dest, "BookKindle must route to Kindle destination, got: {:?}", rec.destinations);
+}
+
+// 17. .bat file is classified as Code (not auto-plan eligible via Review Needed dest)
+#[test]
+fn test_bat_file_is_code_purpose() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let home = std::path::PathBuf::from("/home/user");
+    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::Preview);
+    let rec = engine.analyze_file(
+        &std::path::PathBuf::from("/home/user/Downloads/install.bat"),
+        SafetyLevel::SafeCandidate,
+    );
+    // .bat may be Code or Installer — either routes to Review Needed, not auto-plan eligible
+    assert!(
+        rec.purpose == FilePurpose::Code || rec.purpose == FilePurpose::Installer,
+        ".bat must be Code or Installer purpose, got: {:?}", rec.purpose
+    );
+}
+
+// 18. Manifest: entry with auto_plan_eligible=false is skipped by --apply-safe-only
+// (This is the actual path build_plan_manifest produces for Review Needed destinations)
+#[test]
+fn test_apply_skips_entry_with_auto_plan_eligible_false() {
+    use assert_cmd::Command;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let (src, sha, size) = create_real_file(tmp.path(), "credit.pdf", "sensitive");
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("99_Review Needed")
+        .join("credit.pdf");
+
+    // build_plan_manifest would set auto_plan_eligible=false for Review Needed dests.
+    // Verify apply --apply-safe-only respects that.
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, false, Some(&sha), size);
+    let manifest_path = tmp.path().join("manifest.json");
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    let output = Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .output()
+        .unwrap();
+
+    // File must not be moved
+    assert!(src.exists(), "auto_plan_eligible=false file must not be moved — source must still exist");
+    assert!(!dest.exists(), "Destination must not be created for auto_plan_eligible=false entry");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("SKIP") || combined.contains("skip") || combined.contains("0 file") || combined.contains("0 moved"),
+        "Apply output must indicate no files were moved, got: {combined}"
+    );
+}
+
+// 19. Dry-run output shows MOVABLE and SKIPPED categories
+#[test]
+fn test_dry_run_separates_movable_and_skipped() {
+    use assert_cmd::Command;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    // Entry 1: eligible (SAFE, high confidence, real dest)
+    let (src1, sha1, size1) = create_real_file(tmp.path(), "eligible.txt", "hello world");
+    let dest1 = tmp.path().join("home").join("safesort_user").join("Docs").join("eligible.txt");
+
+    // Entry 2: ineligible (auto_plan_eligible=false)
+    let (src2, sha2, size2) = create_real_file(tmp.path(), "ineligible.txt", "should skip");
+    let dest2 = tmp.path().join("home").join("safesort_user").join("Docs").join("ineligible.txt");
+
+    let sha1_ref: &str = &sha1;
+    let sha2_ref: &str = &sha2;
+
+    let manifest = format!(
+        r#"{{
+  "run_id": "dryrun-test-001",
+  "created_at": "2026-06-05T00:00:00Z",
+  "version": "0.5.1",
+  "scan_target": "/tmp/test",
+  "plan_mode": "safe-autopilot",
+  "entries": [
+    {{
+      "source_path": "{}",
+      "planned_destination": "{}",
+      "checksum_before": {{"sha256":"{sha1_ref}","file_size":{size1},"modified_at":null}},
+      "file_size": {size1},
+      "safety_level": "SAFE",
+      "impact_level": "NONE",
+      "reason": "eligible entry",
+      "confidence": 96,
+      "rule_file_used": null,
+      "dry_run_only": true,
+      "auto_plan_eligible": true
+    }},
+    {{
+      "source_path": "{}",
+      "planned_destination": "{}",
+      "checksum_before": {{"sha256":"{sha2_ref}","file_size":{size2},"modified_at":null}},
+      "file_size": {size2},
+      "safety_level": "SAFE",
+      "impact_level": "NONE",
+      "reason": "ineligible entry",
+      "confidence": 50,
+      "rule_file_used": null,
+      "dry_run_only": true,
+      "auto_plan_eligible": false
+    }}
+  ],
+  "total_scanned": 2,
+  "excluded_for_safety": 0,
+  "dry_run_only": true,
+  "safety_note": "Test dry-run manifest."
+}}"#,
+        src1.display(), dest1.display(),
+        src2.display(), dest2.display(),
+    );
+
+    let manifest_path = tmp.path().join("manifest.json");
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let output = Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--dry-run")
+        .arg("--apply-safe-only")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // With --apply-safe-only, eligible entry must show DRY-RUN and ineligible must show SKIP
+    assert!(
+        stdout.contains("DRY-RUN") || stdout.contains("Would move"),
+        "Dry-run with --apply-safe-only must show eligible entry as DRY-RUN: {stdout}"
+    );
+    assert!(
+        stdout.contains("SKIP") || stdout.contains("Would skip"),
+        "Dry-run with --apply-safe-only must show ineligible entry as SKIP: {stdout}"
+    );
 }

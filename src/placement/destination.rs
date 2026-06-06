@@ -126,6 +126,14 @@ impl DestinationPlanner {
                 ));
             }
             FilePurpose::Report => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Reports"),
+                        &format!("Client Work → {owner_name} → Reports"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
                 destinations.push(self.make_dest(
                     "Workspace/09_Reports/Website Audits",
                     "Reports → Website Audits",
@@ -227,12 +235,21 @@ impl DestinationPlanner {
                 ));
             }
             FilePurpose::Document => {
-                destinations.push(self.make_dest(
-                    "Workspace/09_Reports/Client Reports",
-                    "Reports → Client Reports",
-                    true,
-                    DestinationRisk::Safe,
-                ));
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Documents"),
+                        &format!("Client Work → {owner_name} → Documents"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        "Workspace/09_Reports/Client Reports",
+                        "Reports → Client Reports",
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
             }
             FilePurpose::Archive => {
                 destinations.push(self.make_dest(
@@ -446,6 +463,38 @@ impl DestinationPlanner {
                         DestinationRisk::Safe,
                     ));
                 }
+            }
+            FilePurpose::BookCover => {
+                destinations.push(self.make_dest(
+                    &format!("Workspace/06_Business/Books/{owner_name}/Covers"),
+                    &format!("Books → {owner_name} → Covers"),
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::BookKindle => {
+                destinations.push(self.make_dest(
+                    &format!("Workspace/06_Business/Books/{owner_name}/Kindle"),
+                    &format!("Books → {owner_name} → Kindle"),
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::BookPrint => {
+                destinations.push(self.make_dest(
+                    &format!("Workspace/06_Business/Books/{owner_name}/Print Files"),
+                    &format!("Books → {owner_name} → Print Files"),
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::SensitiveDocument => {
+                destinations.push(self.make_dest(
+                    "Workspace/99_Review Needed/Sensitive Documents",
+                    "Review Needed → Sensitive Documents",
+                    true,
+                    DestinationRisk::NeedsReview,
+                ));
             }
             FilePurpose::BookInterior | FilePurpose::BookManuscript => {
                 destinations.push(self.make_dest(

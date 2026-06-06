@@ -51,6 +51,24 @@ pub fn build_plan_manifest(
             .map(|d| d.path.to_string_lossy().to_string())
             .unwrap_or_else(|| "(no destination computed)".to_string());
 
+        // Safety gate: "no destination computed" is never movable.
+        if planned_destination.contains("no destination computed") {
+            manifest.entries.push(ManifestEntry {
+                source_path: rec.file_path.to_string_lossy().to_string(),
+                planned_destination,
+                checksum_before: None,
+                file_size: 0,
+                safety_level: rec.safety_level.as_str().to_string(),
+                impact_level: rec.impact_level.clone(),
+                reason: "No destination computed — manual review required".to_string(),
+                confidence: rec.confidence.value(),
+                rule_file_used: rule_file_used.map(str::to_string),
+                dry_run_only: true,
+                auto_plan_eligible: false,
+            });
+            continue;
+        }
+
         // Compute checksum if file exists on disk.
         let (checksum_before, file_size) = {
             let p = &rec.file_path;
@@ -69,7 +87,17 @@ pub fn build_plan_manifest(
 
         let auto_plan_eligible = matches!(rec.safety_level, SafetyLevel::SafeCandidate)
             && impact_ok
-            && rec.confidence.value() >= 95;
+            && rec.confidence.value() >= 95
+            // Never auto-plan Review Needed destinations
+            && !planned_destination.contains("99_Review Needed")
+            && !planned_destination.contains("Review Needed")
+            // Never auto-plan if owner is Unknown in the destination
+            && !planned_destination.contains("/Unknown/")
+            // Never auto-plan sensitive documents
+            && !matches!(
+                rec.purpose,
+                crate::placement::file_purpose::FilePurpose::SensitiveDocument
+            );
 
         manifest.entries.push(ManifestEntry {
             source_path: rec.file_path.to_string_lossy().to_string(),

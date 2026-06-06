@@ -417,6 +417,116 @@ impl OwnershipDetector {
                 "Chronic Hacker",
                 OwnerCategory::Brand,
             ),
+            // Big Win Jerky
+            (
+                "big win jerky",
+                "Big Win Jerky",
+                "Big Win Jerky",
+                OwnerCategory::Client,
+            ),
+            (
+                "bigwinjerky",
+                "Big Win Jerky",
+                "Big Win Jerky",
+                OwnerCategory::Client,
+            ),
+            (
+                "big_win_jerky",
+                "Big Win Jerky",
+                "Big Win Jerky",
+                OwnerCategory::Client,
+            ),
+            // Big Win Seasonings
+            (
+                "big win seasonings",
+                "Big Win Seasonings",
+                "Big Win Seasonings",
+                OwnerCategory::Client,
+            ),
+            (
+                "bigwinseasonings",
+                "Big Win Seasonings",
+                "Big Win Seasonings",
+                OwnerCategory::Client,
+            ),
+            (
+                "big_win_seasonings",
+                "Big Win Seasonings",
+                "Big Win Seasonings",
+                OwnerCategory::Client,
+            ),
+            // Generic Big Win (when only "big win" matches without more specific)
+            ("big win", "Big Win", "Big Win", OwnerCategory::Client),
+            // The Ghost Circuit (book)
+            (
+                "the ghost circuit",
+                "The Ghost Circuit",
+                "The Ghost Circuit",
+                OwnerCategory::Brand,
+            ),
+            (
+                "ghost circuit",
+                "The Ghost Circuit",
+                "The Ghost Circuit",
+                OwnerCategory::Brand,
+            ),
+            // Break Build Blaze (book)
+            (
+                "break build blaze",
+                "Break Build Blaze",
+                "Break Build Blaze",
+                OwnerCategory::Brand,
+            ),
+            (
+                "breakbuildblaze",
+                "Break Build Blaze",
+                "Break Build Blaze",
+                OwnerCategory::Brand,
+            ),
+            // The Website That Saved Main Street (book) — 3-token window matches
+            (
+                "saved main street",
+                "The Website That Saved Main Street",
+                "The Website That Saved Main Street",
+                OwnerCategory::Brand,
+            ),
+            (
+                "website that saved",
+                "The Website That Saved Main Street",
+                "The Website That Saved Main Street",
+                OwnerCategory::Brand,
+            ),
+            (
+                "that saved main",
+                "The Website That Saved Main Street",
+                "The Website That Saved Main Street",
+                OwnerCategory::Brand,
+            ),
+            // Noodles Big Slurp Adventure (book)
+            (
+                "noodles big slurp",
+                "Noodles Big Slurp Adventure",
+                "Noodles Big Slurp Adventure",
+                OwnerCategory::Brand,
+            ),
+            (
+                "big slurp adventure",
+                "Noodles Big Slurp Adventure",
+                "Noodles Big Slurp Adventure",
+                OwnerCategory::Brand,
+            ),
+            (
+                "slurp adventure",
+                "Noodles Big Slurp Adventure",
+                "Noodles Big Slurp Adventure",
+                OwnerCategory::Brand,
+            ),
+            (
+                "noodles",
+                "Noodles Big Slurp Adventure",
+                "Noodles Big Slurp Adventure",
+                OwnerCategory::Brand,
+            ),
         ];
 
         for (token, canonical, display, category) in entries {
