@@ -55,6 +55,11 @@ pub enum FilePurpose {
     BookPrint,
     // Sensitive documents
     SensitiveDocument,
+    // Client-specific asset types
+    Label,
+    ComplianceLabel,
+    OnboardingDoc,
+    ProductList,
     // Media specializations
     CannabisImage,
     Unknown,
@@ -110,6 +115,10 @@ impl FilePurpose {
             Self::BookKindle => "Book Kindle File",
             Self::BookPrint => "Book Print File",
             Self::SensitiveDocument => "Sensitive Document",
+            Self::Label => "Label",
+            Self::ComplianceLabel => "Compliance Label",
+            Self::OnboardingDoc => "Onboarding Document",
+            Self::ProductList => "Product List",
             Self::CannabisImage => "Cannabis / Product Image",
             Self::Unknown => "Unknown",
         }
@@ -155,6 +164,10 @@ impl FilePurpose {
             Self::BookKindle => "Kindle",
             Self::BookPrint => "Print Files",
             Self::SensitiveDocument => "Sensitive Documents",
+            Self::Label => "Labels",
+            Self::ComplianceLabel => "Compliance Labels",
+            Self::OnboardingDoc => "Onboarding",
+            Self::ProductList => "Product Lists",
             Self::CannabisImage => "Cannabis",
             Self::Unknown => "Unsorted",
         }
@@ -281,6 +294,9 @@ impl FilePurposeDetector {
             "cp_575",
             "cp575",
             "irs_",
+            "taxreturn",
+            "tax_return",
+            "tax-return",
             "wageclaim",
             "wage_claim",
             "wage-claim",
@@ -289,10 +305,22 @@ impl FilePurposeDetector {
             "backup-codes",
             "recoverycodes",
             "recovery_codes",
-            "passwordbackup",
             "password_backup",
+            "passwordbackup",
+            "password_export",
             "governmentfiling",
             "government_filing",
+            "legalfiling",
+            "legal_filing",
+            "businessentity",
+            "business_entity",
+            "mtd_bank",
+            "bankstatement",
+            "bank_statement",
+            "accountstatement",
+            "account_statement",
+            "claim_doc",
+            "claimdoc",
         ];
         for kw in &sensitive_keywords {
             if filename_lower.contains(kw) {
@@ -301,9 +329,7 @@ impl FilePurposeDetector {
         }
 
         // Early detection: Book Kindle / epub / mobi (before cover check)
-        if filename_lower.contains("kindle")
-            || ext == "epub"
-            || tokens.iter().any(|t| t == "mobi")
+        if filename_lower.contains("kindle") || ext == "epub" || tokens.iter().any(|t| t == "mobi")
         {
             return FilePurpose::BookKindle;
         }
@@ -326,6 +352,42 @@ impl FilePurposeDetector {
             if is_image_ext(&ext) || ext == "pdf" || ext == "epub" {
                 return FilePurpose::BookCover;
             }
+        }
+
+        // KDP manuscript: "kdp" token in filename → BookManuscript (before generic Document)
+        if tokens.iter().any(|t| t == "kdp") {
+            return FilePurpose::BookManuscript;
+        }
+
+        // Printer-friendly PDFs → PrintInsert (routes to Brand Assets/{owner}/Print Assets/Inserts)
+        if filename_lower.contains("printer_friendly") || filename_lower.contains("printerfriendly")
+        {
+            return FilePurpose::PrintInsert;
+        }
+
+        // Compliance labels — before generic Label check
+        if filename_lower.contains("compliance")
+            && (filename_lower.contains("label") || filename_lower.contains("labels"))
+        {
+            return FilePurpose::ComplianceLabel;
+        }
+
+        // Label sheets — after compliance check, before generic purposes
+        if tokens.iter().any(|t| *t == "label" || *t == "labels") {
+            return FilePurpose::Label;
+        }
+
+        // Onboarding documents
+        if tokens.iter().any(|t| *t == "onboarding") {
+            return FilePurpose::OnboardingDoc;
+        }
+
+        // Product lists
+        if filename_lower.contains("product_list")
+            || filename_lower.contains("productlist")
+            || (tokens.iter().any(|t| *t == "product") && tokens.iter().any(|t| *t == "list"))
+        {
+            return FilePurpose::ProductList;
         }
 
         // Also check filename for sticker_sheet pattern (contains underscore)

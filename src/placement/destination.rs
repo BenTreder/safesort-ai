@@ -266,12 +266,39 @@ impl DestinationPlanner {
                 ));
             }
             FilePurpose::Image => {
-                destinations.push(self.make_dest(
-                    "Workspace/07_Media/Product Images",
-                    "Media → Product Images",
-                    true,
-                    DestinationRisk::Safe,
-                ));
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/02_Client Work/{owner_name}/Deliverables/Product Images"
+                        ),
+                        &format!("Client Work → {owner_name} → Product Images"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else if matches!(
+                    owner_cat,
+                    Some(
+                        OwnerCategory::Brand
+                            | OwnerCategory::Project
+                            | OwnerCategory::Website
+                            | OwnerCategory::Plugin
+                    )
+                ) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/06_Business/Brand Assets/{owner_name}/Product Images"),
+                        &format!("Brand Assets → {owner_name} → Product Images"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    // Unknown owner — generic media bucket (will be blocked from auto-plan)
+                    destinations.push(self.make_dest(
+                        "Workspace/07_Media/Product Images",
+                        "Media → Product Images",
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
             }
             FilePurpose::Video => {
                 destinations.push(self.make_dest(
@@ -496,19 +523,93 @@ impl DestinationPlanner {
                     DestinationRisk::NeedsReview,
                 ));
             }
-            FilePurpose::BookInterior | FilePurpose::BookManuscript => {
+            FilePurpose::BookManuscript => {
+                destinations.push(self.make_dest(
+                    &format!("Workspace/06_Business/Books/{owner_name}/Manuscripts"),
+                    &format!("Books → {owner_name} → Manuscripts"),
+                    true,
+                    DestinationRisk::Safe,
+                ));
+            }
+            FilePurpose::BookInterior => {
                 destinations.push(self.make_dest(
                     &format!("Workspace/06_Business/Books/{owner_name}/Interior Drafts"),
                     &format!("Books → {owner_name} → Interior Drafts"),
                     true,
                     DestinationRisk::Safe,
                 ));
-                destinations.push(self.make_dest(
-                    "Workspace/06_Business/Books/Drafts",
-                    "Books → Drafts",
-                    true,
-                    DestinationRisk::Safe,
-                ));
+            }
+            FilePurpose::Label => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Labels"),
+                        &format!("Client Work → {owner_name} → Labels"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Labels"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Labels"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::ComplianceLabel => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Labels/Compliance"),
+                        &format!("Client Work → {owner_name} → Labels → Compliance"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!(
+                            "Workspace/06_Business/Brand Assets/{owner_name}/Print Assets/Labels/Compliance"
+                        ),
+                        &format!("Brand Assets → {owner_name} → Print Assets → Labels → Compliance"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::OnboardingDoc => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Onboarding"),
+                        &format!("Client Work → {owner_name} → Onboarding"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/06_Business/Brand Assets/{owner_name}/Onboarding"),
+                        &format!("Brand Assets → {owner_name} → Onboarding"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
+            }
+            FilePurpose::ProductList => {
+                if matches!(owner_cat, Some(OwnerCategory::Client)) {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/02_Client Work/{owner_name}/Product Lists"),
+                        &format!("Client Work → {owner_name} → Product Lists"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                } else {
+                    destinations.push(self.make_dest(
+                        &format!("Workspace/06_Business/Brand Assets/{owner_name}/Product Lists"),
+                        &format!("Brand Assets → {owner_name} → Product Lists"),
+                        true,
+                        DestinationRisk::Safe,
+                    ));
+                }
             }
             FilePurpose::CannabisImage => {
                 if matches!(owner_cat, Some(OwnerCategory::Client)) {

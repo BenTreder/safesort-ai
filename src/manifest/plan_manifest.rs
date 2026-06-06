@@ -97,7 +97,11 @@ pub fn build_plan_manifest(
             && !matches!(
                 rec.purpose,
                 crate::placement::file_purpose::FilePurpose::SensitiveDocument
-            );
+            )
+            // Never auto-plan generic catch-all destinations
+            && !planned_destination.contains("/Client Reports")
+            && !planned_destination.ends_with("/Documents")
+            && !planned_destination.contains("07_Media/Product Images");
 
         manifest.entries.push(ManifestEntry {
             source_path: rec.file_path.to_string_lossy().to_string(),

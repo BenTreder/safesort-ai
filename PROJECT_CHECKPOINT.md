@@ -1,18 +1,41 @@
 # SafeSort AI — Project Checkpoint
 
-**Date**: 2026-06-05 (Phase 5 hardened — v0.7.0 Downloads Apply-Safety Filtering)
-**Version**: 0.7.0
-**Phase**: Phase 5 hardened — downloads apply-safety filtering + classification improvements
+**Date**: 2026-06-06 (Phase 5 final hardening — v0.8.0 Generic-Destination Blocking)
+**Version**: 0.8.0
+**Phase**: Phase 5 final hardening — generic destination blocking, book/KDP/label routing, 320 tests
 
-## Safety Audit Summary (2026-06-05)
+## Safety Audit Summary (2026-06-06)
 
-- **300 tests passing** (62 lib + 50 bin + 23 placement + 165 safety)
+- **320 tests passing** (62 lib + 50 bin + 23 placement + 185 safety)
 - **apply is GUARDED, not disabled** — real moves enabled with all safety flags
 - **Safe Autopilot** — plan eligibility only; does not move files by itself
 - **Guided Review** — question/review workflow only; does not move files
 - **No destructive filesystem calls** outside `src/apply/engine.rs` (verified by grep)
 - **Demo fixture path**: `./safesort_demo/` (gitignored)
 - **Manual verification**: 15 demo files moved, 15 files restored, no real user files touched
+
+## Phase 5 Final Hardening: Generic-Destination Blocking (v0.8.0)
+
+| Component | Status |
+|---|---|
+| `src/manifest/plan_manifest.rs` — block `/Client Reports`, ends_with `/Documents`, `07_Media/Product Images` | ✅ |
+| `src/placement/file_purpose.rs` — `Label`, `ComplianceLabel`, `OnboardingDoc`, `ProductList` variants | ✅ |
+| `src/placement/file_purpose.rs` — KDP token → `BookManuscript` (before generic Document) | ✅ |
+| `src/placement/file_purpose.rs` — printer_friendly → `PrintInsert` (routes to Brand Assets Print Assets) | ✅ |
+| `src/placement/file_purpose.rs` — expanded sensitive keywords (tax_return, mtd_bank, bank_statement, etc.) | ✅ |
+| `src/placement/destination.rs` — `Label` → `Client Work/{owner}/Labels/` | ✅ |
+| `src/placement/destination.rs` — `ComplianceLabel` → `Client Work/{owner}/Labels/Compliance/` | ✅ |
+| `src/placement/destination.rs` — `OnboardingDoc` → `Client Work/{owner}/Onboarding/` | ✅ |
+| `src/placement/destination.rs` — `ProductList` → `Client Work/{owner}/Product Lists/` | ✅ |
+| `src/placement/destination.rs` — `BookManuscript` → `Books/{owner}/Manuscripts/` (was Interior Drafts) | ✅ |
+| `src/placement/destination.rs` — `Image` with Client owner → specific Client Work Product Images | ✅ |
+| `src/placement/destination.rs` — `Image` with Brand owner → specific Brand Assets Product Images | ✅ |
+| `src/placement/destination.rs` — `Image` with Unknown owner → generic Media (blocked from auto-plan) | ✅ |
+| Real Downloads dry-run: Would move 5, Would skip 250 | ✅ |
+| No generic destinations (Client Reports, /Documents, 07_Media/Product Images) in movable list | ✅ |
+| Previously-wrong files (KDP, labels, compliance) all SKIP | ✅ |
+| 20 new hardening tests | ✅ |
+| 320 tests passing | ✅ |
 
 ## Phase 5 Hardened: Downloads Apply-Safety Filtering (v0.7.0)
 
@@ -121,13 +144,13 @@ Freeze-state backup, real file movement (gated), rollback, apply-status, final p
 | AI summary integration | Phase 6 |
 | Tauri desktop GUI | Phase 7 |
 
-## Test Results (v0.7.0)
+## Test Results (v0.8.0)
 
 ```
 test result: ok. 62 passed   (lib unit tests)
 test result: ok. 50 passed   (binary integration tests)
 test result: ok. 23 passed   (placement tests)
-test result: ok. 165 passed  (safety integration tests)
+test result: ok. 185 passed  (safety integration tests)
 ──────────────────────────────
-Total: 300 tests, 0 failed
+Total: 320 tests, 0 failed
 ```
