@@ -180,6 +180,7 @@ pub fn build_plan_manifest(
         let path_str = rec.file_path.to_string_lossy();
         let dest_is_sensitive_docs = planned_destination.contains("SensitiveInfo")
             || planned_destination.contains("SensitiveDocuments");
+        let dest_is_partial_downloads = planned_destination.contains("PartialDownloads");
 
         // Extension-fallback destinations are direct children of the safesort root
         // (e.g., "safesort/PDFs", "safesort/Audio") with no owner segment.
@@ -192,20 +193,41 @@ pub fn build_plan_manifest(
             })
             .unwrap_or(false);
 
-        let assisted_plan_eligible = !auto_plan_eligible  // exclusive with auto
-            && matches!(rec.safety_level, SafetyLevel::SafeCandidate)
-            && impact_ok
-            && (rec.confidence.value() >= 60 || dest_is_extension_fallback)
-            && !matches!(rec.purpose, FilePurpose::Unknown)
-            && (!matches!(rec.purpose, FilePurpose::Code)
-                || is_safe_code_extension_fallback(&path_str, &planned_destination))
-            // Sensitive docs only allowed in assisted when in local mode (SensitiveInfo/)
-            && (!matches!(rec.purpose, FilePurpose::SensitiveDocument) || dest_is_sensitive_docs)
-            && !is_script_extension(&path_str)
-            && !is_dangerous_config_path(&path_str)
-            && !path_str.ends_with(".part")
-            && !dest_is_review_needed
-            && !planned_destination.contains("(no destination computed)");
+        let assisted_plan_eligible = {
+            let special_local_bucket = dest_is_sensitive_docs || dest_is_partial_downloads;
+
+            let safety_ok = matches!(rec.safety_level, SafetyLevel::SafeCandidate)
+                || (special_local_bucket && !matches!(rec.safety_level, SafetyLevel::Locked));
+
+            let purpose_ok = match rec.purpose {
+                FilePurpose::Code => {
+                    is_safe_code_extension_fallback(&path_str, &planned_destination)
+                }
+                FilePurpose::SensitiveDocument => dest_is_sensitive_docs,
+                FilePurpose::Unknown => {
+                    dest_is_extension_fallback
+                        || dest_is_partial_downloads
+                        || dest_is_sensitive_docs
+                }
+                _ => true,
+            };
+
+            let partial_ok = (!path_str.ends_with(".part") || dest_is_partial_downloads)
+                && (!path_str.ends_with(".crdownload") || dest_is_partial_downloads);
+
+            !auto_plan_eligible
+                && safety_ok
+                && impact_ok
+                && purpose_ok
+                && partial_ok
+                && !is_script_extension(&path_str)
+                && (!is_dangerous_config_path(&path_str) || special_local_bucket)
+                && !dest_is_review_needed
+                && !planned_destination.contains("(no destination computed)")
+                && (dest_is_extension_fallback
+                    || special_local_bucket
+                    || rec.confidence >= crate::placement::confidence::Confidence(60))
+        };
 
         manifest.entries.push(ManifestEntry {
             source_path: rec.file_path.to_string_lossy().to_string(),

@@ -5723,18 +5723,28 @@ fn assisted_eligible_for(filename: &str) -> usize {
     use safesort_ai::manifest::plan_manifest::build_plan_manifest;
     use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
     use safesort_ai::scan::risk::SafetyLevel;
+
     let home = std::path::PathBuf::from("/home/user");
-    let engine = SmartPlacementEngine::new(home.clone(), OrganizationMode::SafeAutopilot);
-    let path = std::path::PathBuf::from(format!("/home/user/Downloads/{filename}"));
+    let scan_root = home.join("Downloads");
+    let safesort_root = scan_root.join("safesort");
+
+    // This helper is meant to test the current-folder local organize model,
+    // not the older global Workspace routing model.
+    let engine = SmartPlacementEngine::new(home, OrganizationMode::SafeAutopilot)
+        .with_local_output(safesort_root);
+
+    let path = scan_root.join(filename);
     let items = vec![(path.clone(), SafetyLevel::SafeCandidate)];
     let result = engine.run(&items);
+
     let manifest = build_plan_manifest(
-        &path,
+        &scan_root,
         OrganizationMode::SafeAutopilot,
         &result.recommendations,
         None,
         1,
     );
+
     manifest
         .entries
         .iter()
@@ -5831,20 +5841,17 @@ fn test_locked_files_never_assisted() {
     }
 }
 
-// 24. Sensitive documents are not assisted_plan_eligible
+// 24. Sensitive documents are assisted only into local SensitiveInfo
 #[test]
-fn test_sensitive_docs_not_assisted() {
-    for filename in &[
-        "bank_statement_jan2026.pdf",
-        "tax_return_2025.pdf",
-        "account_statement_q1.pdf",
-    ] {
-        assert_eq!(
-            assisted_eligible_for(filename),
-            0,
-            "{filename}: sensitive doc must not be assisted_plan_eligible"
-        );
-    }
+fn test_sensitive_docs_assisted_only_to_sensitive_info() {
+    assert!(
+        assisted_eligible_for("creditReport_6071604478.pdf") > 0,
+        "sensitive doc should be assisted when routed to SensitiveInfo"
+    );
+    assert!(
+        assisted_eligible_for("BOIRQP1X5QisyUWedu6D.pdf") > 0,
+        "BOIR doc should be assisted when routed to SensitiveInfo"
+    );
 }
 
 // 25. Script extensions are not assisted_plan_eligible
@@ -5865,13 +5872,12 @@ fn test_script_extensions_not_assisted() {
     }
 }
 
-// 26. Partial download files are not assisted_plan_eligible
+// 26. Partial download files are assisted only into PartialDownloads
 #[test]
-fn test_part_files_not_assisted() {
-    assert_eq!(
-        assisted_eligible_for("bigfile.zip.part"),
-        0,
-        ".part files must not be assisted_plan_eligible"
+fn test_part_files_assisted_to_partial_downloads() {
+    assert!(
+        assisted_eligible_for("bigfile.zip.part") > 0,
+        ".part files should be assisted when routed to PartialDownloads"
     );
 }
 
@@ -6991,6 +6997,34 @@ fn test_receipts_route_to_sensitive_info_local_destination() {
     assert!(
         dest.to_string_lossy().ends_with("/SensitiveInfo/PDFs"),
         "receipts should route to SensitiveInfo/PDFs, got {}",
+        dest.display()
+    );
+}
+
+#[test]
+fn test_ppn_routes_to_sensitive_info() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::local_dest::local_destination;
+
+    let root = std::path::PathBuf::from("/tmp/test/safesort");
+    let dest = local_destination(&root, None, FilePurpose::Unknown, "ppn");
+    assert!(
+        dest.to_string_lossy().ends_with("/SensitiveInfo/PPNs"),
+        "ppn should route to SensitiveInfo/PPNs, got {}",
+        dest.display()
+    );
+}
+
+#[test]
+fn test_partial_download_routes_to_partial_downloads() {
+    use safesort_ai::placement::file_purpose::FilePurpose;
+    use safesort_ai::placement::local_dest::local_destination;
+
+    let root = std::path::PathBuf::from("/tmp/test/safesort");
+    let dest = local_destination(&root, None, FilePurpose::Archive, "part");
+    assert!(
+        dest.to_string_lossy().ends_with("/PartialDownloads"),
+        "partial downloads should route to PartialDownloads, got {}",
         dest.display()
     );
 }

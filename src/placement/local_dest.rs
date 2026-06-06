@@ -30,6 +30,8 @@ pub fn ext_group(extension: &str) -> &'static str {
         "zst" => "ZSTs",
         "7z" => "7Zs",
         "rar" => "RARs",
+        "part" | "crdownload" => "PartialDownloads",
+        "ppn" => "PPNs",
 
         "mp3" => "MP3s",
         "wav" => "WAVs",
@@ -183,6 +185,17 @@ pub fn local_destination(
     extension: &str,
 ) -> PathBuf {
     let ext = ext_group(extension);
+    let ext_l = extension.to_lowercase();
+
+    // Incomplete downloads are not dangerous to move locally, but keep them isolated.
+    if matches!(ext_l.as_str(), "part" | "crdownload") {
+        return safesort_root.join("PartialDownloads");
+    }
+
+    // .ppn style profiles may contain account/VPN/device info, so keep them private.
+    if ext_l == "ppn" {
+        return safesort_root.join("SensitiveInfo").join("PPNs");
+    }
 
     // Sensitive/private/account/legal/security information gets a clear local bucket.
     // It is still only movable through assisted mode with backup + rollback.
