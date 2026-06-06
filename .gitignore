@@ -8,3 +8,6 @@
 .vscode/
 *.tmp
 *.bak
+
+# Generated demo fixture
+safesort_demo/
