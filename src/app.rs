@@ -1509,6 +1509,7 @@ fn cmd_apply(
         rollback_output: rollback_out_path.as_deref(),
         dry_run,
         apply_safe_only,
+        assisted_mode: false,
     };
 
     match crate::apply::apply_manifest(opts) {

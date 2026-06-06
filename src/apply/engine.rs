@@ -29,6 +29,9 @@ pub struct ApplyOptions<'a> {
     pub dry_run: bool,
     /// Only move entries with auto_plan_eligible=true.
     pub apply_safe_only: bool,
+    /// Also move entries with assisted_plan_eligible=true (requires backup + rollback).
+    /// Ignored when apply_safe_only=true.
+    pub assisted_mode: bool,
 }
 
 /// Validate that a destination path is safe to write to.
@@ -101,13 +104,26 @@ pub fn load_plan_manifest(manifest_path: &Path) -> Result<RollbackManifest> {
 fn entry_safety_gate(
     entry: &crate::manifest::rollback::ManifestEntry,
     apply_safe_only: bool,
+    assisted_mode: bool,
 ) -> std::result::Result<(), String> {
-    // Gate 1: auto_plan_eligible required when apply_safe_only.
-    if apply_safe_only && !entry.auto_plan_eligible {
-        return Err(format!(
-            "Entry is not auto_plan_eligible (confidence {}%, impact {}, safety {})",
-            entry.confidence, entry.impact_level, entry.safety_level
-        ));
+    // Gate 1: eligibility check.
+    if apply_safe_only {
+        // Strict mode: only auto_plan_eligible entries.
+        if !entry.auto_plan_eligible {
+            return Err(format!(
+                "Entry is not auto_plan_eligible (confidence {}%, impact {}, safety {})",
+                entry.confidence, entry.impact_level, entry.safety_level
+            ));
+        }
+    } else if assisted_mode {
+        // Assisted mode: auto_plan_eligible OR assisted_plan_eligible.
+        if !entry.auto_plan_eligible && !entry.assisted_plan_eligible {
+            return Err(format!(
+                "Entry is not eligible for assisted mode \
+                 (confidence {}%, impact {}, safety {})",
+                entry.confidence, entry.impact_level, entry.safety_level
+            ));
+        }
     }
 
     // Gate 2: safety level must be SAFE.
@@ -235,7 +251,7 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
         let final_dest = resolve_final_destination(&dest_dir, &source);
 
         // Per-entry safety gate.
-        match entry_safety_gate(entry, opts.apply_safe_only) {
+        match entry_safety_gate(entry, opts.apply_safe_only, opts.assisted_mode) {
             Err(reason) => {
                 println!("  SKIP  {}", source.display());
                 println!("        Reason: {reason}");

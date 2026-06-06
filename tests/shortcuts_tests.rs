@@ -250,5 +250,6 @@ fn test_apply_options_struct_accessible() {
         rollback_output: None,
         dry_run: true,
         apply_safe_only: true,
+        assisted_mode: false,
     };
 }

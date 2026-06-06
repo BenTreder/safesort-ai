@@ -47,6 +47,14 @@ fn main() -> Result<()> {
         }
     }
 
+    if args.len() == 2 && args[0] == "-run" {
+        match args[1].as_str() {
+            "--auto-safe-only" => return shortcuts::cmd_shortcut_run_auto_safe_only(),
+            "--assisted" => return shortcuts::cmd_shortcut_run(),
+            _ => {}
+        }
+    }
+
     let cli = Cli::parse();
     app::run(cli)
 }

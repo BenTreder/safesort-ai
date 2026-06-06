@@ -291,14 +291,22 @@ impl DestinationPlanner {
                         DestinationRisk::Safe,
                     ));
                 } else {
-                    // Unknown owner — generic media bucket (will be blocked from auto-plan)
+                    // Unknown owner — generic unsorted bucket (blocked from auto-plan, allowed in assisted)
                     destinations.push(self.make_dest(
-                        "Workspace/07_Media/Product Images",
-                        "Media → Product Images",
+                        "Workspace/07_Media/Images/Unsorted",
+                        "Media → Images → Unsorted",
                         true,
                         DestinationRisk::Safe,
                     ));
                 }
+            }
+            FilePurpose::Audio => {
+                destinations.push(self.make_dest(
+                    "Workspace/07_Media/Audio/Sound Effects",
+                    "Media → Audio → Sound Effects",
+                    true,
+                    DestinationRisk::Safe,
+                ));
             }
             FilePurpose::Video => {
                 destinations.push(self.make_dest(

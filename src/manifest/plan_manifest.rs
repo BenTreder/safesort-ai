@@ -1,8 +1,19 @@
 use super::checksum::checksum_file;
 use super::rollback::{ManifestEntry, RollbackManifest};
 use crate::placement::engine::{OrganizationMode, PlacementRecommendation};
+use crate::placement::file_purpose::FilePurpose;
 use crate::scan::risk::SafetyLevel;
 use std::path::Path;
+
+/// Returns true if the file extension marks it as a shell/system script.
+fn is_script_extension(path_str: &str) -> bool {
+    let lower = path_str.to_lowercase();
+    let ext = std::path::Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    matches!(ext, "sh" | "bat" | "cmd" | "ps1" | "bash" | "zsh" | "fish")
+}
 
 /// Build a dry-run rollback manifest from a set of placement recommendations.
 ///
@@ -65,6 +76,7 @@ pub fn build_plan_manifest(
                 rule_file_used: rule_file_used.map(str::to_string),
                 dry_run_only: true,
                 auto_plan_eligible: false,
+                assisted_plan_eligible: false,
             });
             continue;
         }
@@ -94,14 +106,28 @@ pub fn build_plan_manifest(
             // Never auto-plan if owner is Unknown in the destination
             && !planned_destination.contains("/Unknown/")
             // Never auto-plan sensitive documents
-            && !matches!(
-                rec.purpose,
-                crate::placement::file_purpose::FilePurpose::SensitiveDocument
-            )
+            && !matches!(rec.purpose, FilePurpose::SensitiveDocument)
             // Never auto-plan generic catch-all destinations
             && !planned_destination.contains("/Client Reports")
             && !planned_destination.ends_with("/Documents")
             && !planned_destination.contains("07_Media/Product Images");
+
+        // Assisted mode: lower confidence bar, more file types allowed,
+        // but still exclude sensitive docs, code/scripts, and Review Needed destinations.
+        let path_str = rec.file_path.to_string_lossy();
+        let assisted_plan_eligible = !auto_plan_eligible  // exclusive with auto
+            && matches!(rec.safety_level, SafetyLevel::SafeCandidate)
+            && impact_ok
+            && rec.confidence.value() >= 60
+            && !matches!(
+                rec.purpose,
+                FilePurpose::SensitiveDocument | FilePurpose::Code | FilePurpose::Unknown
+            )
+            && !is_script_extension(&path_str)
+            && !path_str.ends_with(".part")
+            // Destinations that go to Review Needed stay as review-only
+            && !planned_destination.contains("99_Review Needed")
+            && !planned_destination.contains("(no destination computed)");
 
         manifest.entries.push(ManifestEntry {
             source_path: rec.file_path.to_string_lossy().to_string(),
@@ -115,6 +141,7 @@ pub fn build_plan_manifest(
             rule_file_used: rule_file_used.map(str::to_string),
             dry_run_only: true,
             auto_plan_eligible,
+            assisted_plan_eligible,
         });
     }
 

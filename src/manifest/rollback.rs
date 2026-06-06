@@ -30,6 +30,10 @@ pub struct ManifestEntry {
     pub dry_run_only: bool,
     /// Whether this entry is eligible for safe autopilot (≥95% confidence, NONE/LOW impact, SAFE).
     pub auto_plan_eligible: bool,
+    /// Whether this entry is eligible for assisted mode (≥60% confidence, SAFE, not sensitive/code).
+    /// Exclusive with auto_plan_eligible: assisted=true means "needs assisted, not auto".
+    #[serde(default)]
+    pub assisted_plan_eligible: bool,
 }
 
 /// A full rollback manifest produced by a planning run.
@@ -97,6 +101,14 @@ impl RollbackManifest {
         self.entries
             .iter()
             .filter(|e| !e.auto_plan_eligible)
+            .collect()
+    }
+
+    /// Return entries eligible for assisted mode only (not auto-safe).
+    pub fn assisted_plan_entries(&self) -> Vec<&ManifestEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.assisted_plan_eligible)
             .collect()
     }
 }
