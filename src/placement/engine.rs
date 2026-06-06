@@ -1,6 +1,7 @@
 use super::confidence::{Confidence, ConfidenceBand};
 use super::destination::{DestinationPlanner, DestinationRisk, PlacementDestination};
 use super::file_purpose::{FilePurpose, FilePurposeDetector};
+use super::local_dest;
 use super::ownership::{OwnerCategory, OwnershipDetector};
 use super::question_queue::{Question, QuestionOption, QuestionQueue};
 use super::rules::RulesEngine;
@@ -100,6 +101,9 @@ pub struct SmartPlacementEngine {
     custom_destinations: IndexMap<String, String>,
     /// Owner safe roots from a rule file: canonical → safe_root path.
     owner_safe_roots: IndexMap<String, String>,
+    /// When set, use the local organize model: `{local_output_root}/{Owner}/{Ext}/[Sub]/`.
+    /// The root passed here should be `scan_target/safesort`.
+    local_output_root: Option<PathBuf>,
 }
 
 impl SmartPlacementEngine {
@@ -114,7 +118,20 @@ impl SmartPlacementEngine {
             home,
             custom_destinations: IndexMap::new(),
             owner_safe_roots: IndexMap::new(),
+            local_output_root: None,
         }
+    }
+
+    /// Builder: enable local organize mode.
+    ///
+    /// When set, destinations are computed as `{local_root}/{Owner}/{ExtGroup}/[Subcategory]/`
+    /// instead of the legacy `~/Workspace/...` paths. Rule-file overrides are ignored in
+    /// local mode — the local structure is always owner-first.
+    ///
+    /// Pass `scan_target.join("safesort")` as `local_root`.
+    pub fn with_local_output(mut self, local_root: PathBuf) -> Self {
+        self.local_output_root = Some(local_root);
+        self
     }
 
     /// Builder: inject aliases and custom destinations from a rule file.
@@ -213,15 +230,31 @@ impl SmartPlacementEngine {
         }
 
         // Generate destinations
+        let ext = Path::new(&file_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
         let mut destinations = if matches!(safety_level, SafetyLevel::Locked) {
             vec![]
+        } else if let Some(ref local_root) = self.local_output_root {
+            // Local organize mode: owner-first structure under scan_target/safesort/
+            let dest_path =
+                local_dest::local_destination(local_root, owner.as_ref(), purpose, &ext);
+            vec![PlacementDestination {
+                path: dest_path,
+                description: format!("Local → {}", local_dest::ext_group(&ext)),
+                is_staging: true,
+                risk: DestinationRisk::Safe,
+            }]
         } else {
             self.destination.plan(owner.as_ref(), purpose, is_safe_zone)
         };
 
-        // Apply rule-file custom destinations (if not LOCKED).
+        // Apply rule-file custom destinations (if not LOCKED and not in local mode).
         let mut rule_note: Option<String> = None;
-        if !matches!(safety_level, SafetyLevel::Locked) {
+        if !matches!(safety_level, SafetyLevel::Locked) && self.local_output_root.is_none() {
             if let Some(ref o) = owner {
                 // 1. Try specific staging destination: "{canonical}.{purpose}"
                 let key = format!("{}.{}", o.canonical, purpose.as_str().to_lowercase());

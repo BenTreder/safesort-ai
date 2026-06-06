@@ -5,6 +5,7 @@ use crate::placement::engine::{OrganizationMode, SmartPlacementEngine};
 use crate::scan::Scanner;
 use crate::scan::risk::SafetyLevel;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -20,6 +21,12 @@ pub fn rollbacks_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".local/share/safesort/rollbacks")
+}
+
+/// The local organize output root for a given scan target.
+/// All organized files go here — never outside this folder.
+pub fn local_safesort_root(target: &Path) -> PathBuf {
+    target.join("safesort")
 }
 
 // ─── Latest pointer ────────────────────────────────────────────────
@@ -72,7 +79,6 @@ pub fn find_newest_rollback_receipt() -> Option<PathBuf> {
 
 // ─── Scan summary ──────────────────────────────────────────────────
 
-/// Category counts from a scan run, used for display in -scan.
 #[derive(Debug, Default, Clone)]
 pub struct ScanCounts {
     pub auto_safe: usize,
@@ -82,39 +88,45 @@ pub struct ScanCounts {
     pub total: usize,
 }
 
-/// Rich result returned by do_scan.
+/// Rich result returned by do_scan_full.
 #[derive(Debug)]
 pub struct DoScanResult {
     pub manifest_path: PathBuf,
     pub counts: ScanCounts,
-    /// (source_name, destination_label) pairs for preview (limited to first 10 auto + 10 assisted)
+    /// Preview lines: (source_filename, local_destination_path) for auto-safe entries (up to 10)
     pub auto_preview: Vec<(String, String)>,
+    /// Preview lines for assisted entries (up to 10)
     pub assisted_preview: Vec<(String, String)>,
+    /// Group counts: top_level_folder_name → count of files routed there
+    pub folder_groups: BTreeMap<String, usize>,
 }
 
-// ─── Core scan logic (pure / testable) ────────────────────────────
+// ─── Core scan logic ───────────────────────────────────────────────
 
-/// Scan `target`, store a manifest, and return counts and preview lists.
+/// Simplified do_scan returning only the manifest path (for backward compat in tests).
 pub fn do_scan(target: &Path) -> Result<PathBuf> {
     do_scan_full(target).map(|r| r.manifest_path)
 }
 
-/// Like do_scan but returns the full DoScanResult (counts + previews).
+/// Full scan: produces manifest + category counts + preview + folder groups.
 pub fn do_scan_full(target: &Path) -> Result<DoScanResult> {
     let target = &target.to_path_buf();
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let org = OrganizationMode::SafeAutopilot;
     let depth = 2;
 
-    let excludes: Vec<String> = crate::config::DEFAULT_HEAVY_EXCLUDES
+    let safesort_root = local_safesort_root(target);
+
+    // Always exclude the local safesort output folder and standard heavy excludes
+    let mut excludes: Vec<String> = crate::config::DEFAULT_HEAVY_EXCLUDES
         .iter()
         .map(|s| s.to_string())
         .collect();
+    excludes.push("safesort".to_string()); // skip ./safesort/ if it already exists
 
     let scanner = Scanner::new();
     let report = scanner.scan(target, &home, depth, &excludes)?;
 
-    // Count LOCKED items from the scan report (never_touch)
     let never_touch_count = report
         .items
         .values()
@@ -136,7 +148,9 @@ pub fn do_scan_full(target: &Path) -> Result<DoScanResult> {
         })
         .collect();
 
-    let engine = SmartPlacementEngine::new(home.clone(), org);
+    // Use local organize mode: destinations go into ./safesort/
+    let engine =
+        SmartPlacementEngine::new(home.clone(), org).with_local_output(safesort_root.clone());
     let placement = engine.run(&items);
 
     let manifest = build_plan_manifest(
@@ -163,22 +177,61 @@ pub fn do_scan_full(target: &Path) -> Result<DoScanResult> {
         scan_target: target.to_string_lossy().to_string(),
         created_at: chrono::Local::now().to_rfc3339(),
     };
-    let pointer_json = serde_json::to_string_pretty(&pointer)?;
-    std::fs::write(mdir.join("latest.json"), pointer_json)?;
+    std::fs::write(
+        mdir.join("latest.json"),
+        serde_json::to_string_pretty(&pointer)?,
+    )?;
 
-    // Compute counts from manifest entries
-    let auto_safe = manifest.entries.iter().filter(|e| e.auto_plan_eligible).count();
-    let assisted = manifest.entries.iter().filter(|e| e.assisted_plan_eligible).count();
+    // Compute counts
+    let auto_safe = manifest
+        .entries
+        .iter()
+        .filter(|e| e.auto_plan_eligible)
+        .count();
+    let assisted = manifest
+        .entries
+        .iter()
+        .filter(|e| e.assisted_plan_eligible)
+        .count();
     let review_only_entries = manifest
         .entries
         .iter()
         .filter(|e| !e.auto_plan_eligible && !e.assisted_plan_eligible)
         .count();
-    // REVIEW-level files go into excluded_for_safety but we captured never_touch separately;
-    // remaining excluded items are REVIEW-level
-    let review_level = manifest.excluded_for_safety.saturating_sub(never_touch_count);
+    let review_level = manifest
+        .excluded_for_safety
+        .saturating_sub(never_touch_count);
     let review_only = review_only_entries + review_level;
     let total = manifest.total_scanned;
+
+    // Build folder group counts from auto + assisted entries
+    let mut folder_groups: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in manifest
+        .entries
+        .iter()
+        .filter(|e| e.auto_plan_eligible || e.assisted_plan_eligible)
+    {
+        let dest = PathBuf::from(&entry.planned_destination);
+        // Extract the first two components after safesort_root
+        if let Ok(rel) = dest.strip_prefix(&safesort_root) {
+            let top = rel
+                .components()
+                .next()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_else(|| "Other".to_string());
+            let second = rel
+                .components()
+                .nth(1)
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_default();
+            let key = if second.is_empty() {
+                top
+            } else {
+                format!("{}/{}", top, second)
+            };
+            *folder_groups.entry(key).or_insert(0) += 1;
+        }
+    }
 
     // Build preview lists (up to 10 each)
     let auto_preview: Vec<(String, String)> = manifest
@@ -220,10 +273,11 @@ pub fn do_scan_full(target: &Path) -> Result<DoScanResult> {
         },
         auto_preview,
         assisted_preview,
+        folder_groups,
     })
 }
 
-// ─── Confirmation helpers ──────────────────────────────────────────
+// ─── Confirmation helper ───────────────────────────────────────────
 
 fn read_confirmation(prompt: &str, stdin: &mut impl BufRead, stdout: &mut impl Write) -> String {
     write!(stdout, "{}", prompt).ok();
@@ -233,17 +287,86 @@ fn read_confirmation(prompt: &str, stdin: &mut impl BufRead, stdout: &mut impl W
     line.trim().to_string()
 }
 
+// ─── safesort -learn ───────────────────────────────────────────────
+
+pub fn cmd_shortcut_learn() -> Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+    let profile_dir = home.join(".local/share/safesort");
+    let profile_path = profile_dir.join("profile.json");
+
+    println!();
+    println!("  SafeSort AI — Learn");
+    println!("  Read-only scan of: {}", home.display());
+    println!("  Profile output:    {}", profile_path.display());
+    println!("  This is a READ-ONLY scan — nothing will be moved.");
+    println!();
+
+    print!("  Scanning home directory for brands, clients, and projects...");
+    io::stdout().flush().ok();
+
+    // Run the profile scan read-only
+    let scanner = crate::scan::Scanner::new();
+    let excludes: Vec<String> = crate::config::DEFAULT_HEAVY_EXCLUDES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    match scanner.scan(&home, &home, 3, &excludes) {
+        Ok(report) => {
+            println!(" done.");
+            println!();
+
+            // Save the profile summary
+            std::fs::create_dir_all(&profile_dir)?;
+            let profile_json = serde_json::to_string_pretty(&report.profile).map_err(|e| {
+                SafeSortError::InvalidPath(format!("Cannot serialize profile: {e}"))
+            })?;
+            std::fs::write(&profile_path, profile_json)?;
+
+            println!("  Profile saved to: {}", profile_path.display());
+
+            if let Some(ref profile) = report.profile {
+                let sorted = profile.sorted_scores();
+                if !sorted.is_empty() {
+                    println!();
+                    println!("  ─── Detected owners / brands / projects ─────────────────────");
+                    for (token, score) in sorted.iter().take(15) {
+                        println!("    {:40}  score: {:.1}", token, score.score);
+                    }
+                    if sorted.len() > 15 {
+                        println!("    ... and {} more (see profile.json)", sorted.len() - 15);
+                    }
+                } else {
+                    println!("  No strong ownership signals detected.");
+                }
+            }
+        }
+        Err(e) => {
+            println!(" error.");
+            println!("  Profile scan failed: {e}");
+            println!("  Nothing was saved.");
+        }
+    }
+
+    println!();
+    println!("  Nothing was moved.");
+    println!();
+    Ok(())
+}
+
 // ─── safesort -scan ────────────────────────────────────────────────
 
 pub fn cmd_shortcut_scan() -> Result<()> {
     let current_dir = std::env::current_dir().map_err(|e| {
         SafeSortError::InvalidPath(format!("Cannot determine current directory: {e}"))
     })?;
+    let safesort_root = local_safesort_root(&current_dir);
 
     println!();
-    println!("  SafeSort AI — Quick Scan");
-    println!("  Target: {}", current_dir.display());
-    println!("  Mode:   safe-autopilot + assisted-eligible (depth 2, default excludes)");
+    println!("  SafeSort AI — Quick Scan (Local Organize Mode)");
+    println!("  Target:  {}", current_dir.display());
+    println!("  Output:  {}", safesort_root.display());
+    println!("  Mode:    safe-autopilot + assisted (depth 2, default excludes)");
     println!("  This is a DRY RUN — nothing will be moved.");
     println!();
 
@@ -257,17 +380,14 @@ pub fn cmd_shortcut_scan() -> Result<()> {
     let c = &scan_result.counts;
     println!("  ─── Scan Results ────────────────────────────────────────────");
     println!(
-        "  AUTO-SAFE:    {:>4}  (can move immediately in safe mode)",
+        "  AUTO-SAFE:    {:>4}  (high-confidence, can move in safe mode)",
         c.auto_safe
     );
     println!(
         "  ASSISTED:     {:>4}  (can organize with backup + rollback)",
         c.assisted
     );
-    println!(
-        "  REVIEW ONLY:  {:>4}  (need manual review)",
-        c.review_only
-    );
+    println!("  REVIEW ONLY:  {:>4}  (need manual review)", c.review_only);
     println!(
         "  NEVER TOUCH:  {:>4}  (system/project/risky files)",
         c.never_touch
@@ -276,13 +396,41 @@ pub fn cmd_shortcut_scan() -> Result<()> {
     println!("  Total scanned: {}", c.total);
     println!();
 
+    // Planned folder summary (grouped by owner/ext)
+    if !scan_result.folder_groups.is_empty() {
+        println!(
+            "  ─── Planned local folders: {} ──────────────────────────────",
+            safesort_root.display()
+        );
+        // Sort by count descending
+        let mut groups: Vec<(&String, &usize)> = scan_result.folder_groups.iter().collect();
+        groups.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (folder, count) in groups.iter().take(20) {
+            println!("    {:50}  {:>3}", folder, count);
+        }
+        if scan_result.folder_groups.len() > 20 {
+            println!(
+                "    ... and {} more groups",
+                scan_result.folder_groups.len() - 20
+            );
+        }
+        println!();
+    }
+
     if !scan_result.auto_preview.is_empty() {
         println!("  ─── AUTO-SAFE Preview ───────────────────────────────────────");
         for (name, dest) in &scan_result.auto_preview {
-            println!("    {}  →  {}", name, dest);
+            let rel = PathBuf::from(dest)
+                .strip_prefix(&safesort_root)
+                .map(|p| format!("safesort/{}", p.display()))
+                .unwrap_or_else(|_| dest.clone());
+            println!("    {}  →  {}", name, rel);
         }
         if c.auto_safe > scan_result.auto_preview.len() {
-            println!("    ... and {} more", c.auto_safe - scan_result.auto_preview.len());
+            println!(
+                "    ... and {} more",
+                c.auto_safe - scan_result.auto_preview.len()
+            );
         }
         println!();
     }
@@ -290,10 +438,17 @@ pub fn cmd_shortcut_scan() -> Result<()> {
     if !scan_result.assisted_preview.is_empty() {
         println!("  ─── ASSISTED Preview ────────────────────────────────────────");
         for (name, dest) in &scan_result.assisted_preview {
-            println!("    {}  →  {}", name, dest);
+            let rel = PathBuf::from(dest)
+                .strip_prefix(&safesort_root)
+                .map(|p| format!("safesort/{}", p.display()))
+                .unwrap_or_else(|_| dest.clone());
+            println!("    {}  →  {}", name, rel);
         }
         if c.assisted > scan_result.assisted_preview.len() {
-            println!("    ... and {} more", c.assisted - scan_result.assisted_preview.len());
+            println!(
+                "    ... and {} more",
+                c.assisted - scan_result.assisted_preview.len()
+            );
         }
         println!();
     }
@@ -307,6 +462,7 @@ pub fn cmd_shortcut_scan() -> Result<()> {
             "  Run `safesort -run` to organize {} AUTO-SAFE + ASSISTED files",
             movable
         );
+        println!("  into {}/safesort/", current_dir.display());
         println!("  with freeze-state backup. After organizing, SafeSort will ask");
         println!("  whether to KEEP or ROLLBACK.");
         if c.auto_safe > 0 {
@@ -321,14 +477,11 @@ pub fn cmd_shortcut_scan() -> Result<()> {
     Ok(())
 }
 
-// ─── safesort -run (shared implementation) ─────────────────────────
+// ─── safesort -run ─────────────────────────────────────────────────
 
-/// Whether -run operates in assisted mode (default) or auto-safe-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunMode {
-    /// Move AUTO-SAFE + ASSISTED files. Default.
     Assisted,
-    /// Move only AUTO-SAFE files (strict conservative mode).
     AutoSafeOnly,
 }
 
@@ -347,8 +500,8 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
     let current_dir_canonical = current_dir
         .canonicalize()
         .unwrap_or_else(|_| current_dir.clone());
+    let safesort_root = local_safesort_root(&current_dir);
 
-    // Load latest pointer.
     let pointer = match load_latest_pointer()? {
         Some(p) => p,
         None => {
@@ -361,7 +514,6 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
         }
     };
 
-    // Verify current dir matches scan target.
     let pointer_target = PathBuf::from(&pointer.scan_target);
     let pointer_target_canonical = pointer_target
         .canonicalize()
@@ -399,14 +551,14 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
     };
 
     println!();
-    println!("  SafeSort AI — Quick Run");
+    println!("  SafeSort AI — Quick Run (Local Organize Mode)");
     println!("  Target:   {}", current_dir.display());
+    println!("  Output:   {}", safesort_root.display());
     println!("  Manifest: {}", manifest_path.display());
     println!("  Scanned:  {}", pointer.created_at);
     println!("  Mode:     {}", mode_label);
     println!();
 
-    // Run preflight again.
     println!("  Running preflight...");
     let preflight_report = crate::preflight::run_preflight(&manifest_path)?;
     print!("{}", preflight_report.render());
@@ -434,7 +586,6 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
 
-    // Dry-run to count what would move.
     let dry_opts = ApplyOptions {
         manifest_path: &manifest_path,
         backup_dir: &default_backup,
@@ -462,20 +613,20 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
     if would_move == 0 {
         println!("  No eligible files to move in this mode. Nothing was moved.");
         if mode == RunMode::AutoSafeOnly {
-            println!("  Try `safesort -run --assisted` or re-scan with `safesort -scan`.");
+            println!("  Try `safesort -run` (assisted mode) or re-scan with `safesort -scan`.");
         }
         return Ok(());
     }
 
     println!();
-    println!("  ─── Files that will be moved ────────────────────────────────");
-    println!("  {} file(s) will be organized.", would_move);
+    println!("  ─── Files that will be organized ────────────────────────────");
+    println!("  {} file(s) will be moved into:", would_move);
+    println!("    {}", safesort_root.display());
     println!();
     println!("  Safety: freeze-state backup will be created before each move.");
     println!("  You will be asked to KEEP or ROLLBACK after organizing.");
     println!();
 
-    // Typed confirmation.
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
     let mut stdout = io::stdout();
@@ -513,13 +664,17 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
             println!("  ─── Organize Complete ───────────────────────────────────────");
             println!("  Files moved:      {}", receipt.total_moved);
             println!("  Files skipped:    {}", receipt.total_skipped);
+            println!("  Local output:     {}", safesort_root.display());
             println!("  Rollback receipt: {}", rollback_path.display());
             println!();
 
-            // Post-apply KEEP or ROLLBACK prompt.
-            println!("  SafeSort moved {} file(s).", receipt.total_moved);
-            println!("  Type KEEP to keep these changes, or ROLLBACK to undo now:");
+            println!(
+                "  SafeSort moved {} file(s) into {}.",
+                receipt.total_moved,
+                safesort_root.display()
+            );
             println!();
+            println!("  Type KEEP to keep these changes, or ROLLBACK to undo now:");
 
             let answer = read_confirmation(
                 "  Your choice (KEEP / ROLLBACK): ",
@@ -533,17 +688,16 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
                 println!();
                 rollback_apply(&rollback_path, false)?;
                 println!();
-                println!("  Rollback complete. Files restored.");
+                println!("  Rollback complete. Files restored to original locations.");
             } else if answer == "KEEP" {
                 println!("  Changes kept.");
-                println!("  Rollback receipt saved at: {}", rollback_path.display());
+                println!("  Organized files are in: {}", safesort_root.display());
+                println!("  Rollback receipt saved: {}", rollback_path.display());
                 println!("  To undo later:  safesort -rollback");
             } else {
-                println!(
-                    "  Unrecognized input '{}'. Changes have been kept.",
-                    answer
-                );
-                println!("  Rollback receipt saved at: {}", rollback_path.display());
+                println!("  Unrecognized input '{}'. Changes have been kept.", answer);
+                println!("  Organized files are in: {}", safesort_root.display());
+                println!("  Rollback receipt saved: {}", rollback_path.display());
                 println!("  To undo later:  safesort -rollback");
             }
         }
@@ -621,7 +775,6 @@ pub fn cmd_shortcut_rollback() -> Result<()> {
     println!("  Rolling back...");
     println!();
 
-    // confirm_overwrite=false — do not bypass overwrite protections.
     rollback_apply(&receipt_path, false)?;
 
     println!();
@@ -635,22 +788,34 @@ pub fn show_shortcut_help() {
     println!("  SafeSort AI Quick Commands");
     println!();
     println!("  Simple:");
-    println!("    safesort -scan                Preview organization for the current folder");
-    println!("    safesort -run                 Organize AUTO-SAFE + ASSISTED files (with backup + rollback)");
-    println!("    safesort -run --auto-safe-only  Organize only AUTO-SAFE files (strictest mode)");
+    println!(
+        "    safesort -learn               Learn brands/clients from your home folder (read-only)"
+    );
+    println!("    safesort -scan                Preview local organization for current folder");
+    println!("    safesort -run                 Organize AUTO-SAFE + ASSISTED files → ./safesort/");
+    println!("    safesort -run --auto-safe-only  Organize only AUTO-SAFE files");
     println!("    safesort -status              Show latest apply/rollback status");
     println!("    safesort -rollback            Roll back latest apply");
+    println!();
+    println!("  Output structure (owner/category first):");
+    println!("    ./safesort/LadybugHoney/PDFs/NFC Inserts/");
+    println!("    ./safesort/QuickTapID/PDFs/Inserts/");
+    println!("    ./safesort/916Hookup/PDFs/Stickers/");
+    println!("    ./safesort/BenTreder/PDFs/Resumes/");
+    println!("    ./safesort/Audio/MP3s/");
+    println!("    ./safesort/Video/MP4s/");
+    println!("    ./safesort/Other/PNGs/");
+    println!();
+    println!("  Safety:");
+    println!("    -scan and -learn never move files");
+    println!("    -run requires preflight, backup, typed ORGANIZE, and KEEP/ROLLBACK prompt");
+    println!("    Output is always inside ./safesort/ — never outside current folder");
+    println!("    LOCKED / HIGH-impact / code files never move");
     println!();
     println!("  Advanced:");
     println!("    safesort organize ...");
     println!("    safesort preflight ...");
     println!("    safesort apply ...");
     println!("    safesort rollback ...");
-    println!();
-    println!("  Safety:");
-    println!("    -scan never moves files");
-    println!("    -run requires preflight, backup, typed confirmation, and KEEP/ROLLBACK prompt");
-    println!("    LOCKED / HIGH-impact / sensitive / code files never move");
-    println!("    REVIEW ONLY files are shown but never moved automatically");
     println!();
 }

@@ -143,7 +143,10 @@ fn test_scan_writes_latest_pointer() {
         "latest.json scan_target must not be empty"
     );
     // The manifest we wrote must exist even if latest.json was overwritten.
-    assert!(manifest_path.exists(), "written manifest file must exist on disk");
+    assert!(
+        manifest_path.exists(),
+        "written manifest file must exist on disk"
+    );
 }
 
 #[test]

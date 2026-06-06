@@ -2,6 +2,7 @@ pub mod confidence;
 pub mod destination;
 pub mod engine;
 pub mod file_purpose;
+pub mod local_dest;
 pub mod ownership;
 pub mod question_queue;
 pub mod rules;

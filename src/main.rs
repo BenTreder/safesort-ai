@@ -39,6 +39,7 @@ fn main() -> Result<()> {
 
     if args.len() == 1 {
         match args[0].as_str() {
+            "-learn" => return shortcuts::cmd_shortcut_learn(),
             "-scan" => return shortcuts::cmd_shortcut_scan(),
             "-run" => return shortcuts::cmd_shortcut_run(),
             "-status" => return shortcuts::cmd_shortcut_status(),

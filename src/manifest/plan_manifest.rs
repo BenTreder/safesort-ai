@@ -97,36 +97,38 @@ pub fn build_plan_manifest(
             }
         };
 
+        // Review Needed destinations should never be auto or assisted
+        // (matches both legacy "99_Review Needed" and new local "Other/Review Needed")
+        let dest_is_review_needed = planned_destination.contains("Review Needed")
+            || planned_destination.contains("99_Review");
+
         let auto_plan_eligible = matches!(rec.safety_level, SafetyLevel::SafeCandidate)
             && impact_ok
             && rec.confidence.value() >= 95
-            // Never auto-plan Review Needed destinations
-            && !planned_destination.contains("99_Review Needed")
-            && !planned_destination.contains("Review Needed")
-            // Never auto-plan if owner is Unknown in the destination
+            && !dest_is_review_needed
+            // Never auto-plan if owner is Unknown in the destination (legacy path)
             && !planned_destination.contains("/Unknown/")
             // Never auto-plan sensitive documents
             && !matches!(rec.purpose, FilePurpose::SensitiveDocument)
-            // Never auto-plan generic catch-all destinations
+            // Never auto-plan legacy generic catch-all destinations
             && !planned_destination.contains("/Client Reports")
             && !planned_destination.ends_with("/Documents")
             && !planned_destination.contains("07_Media/Product Images");
 
-        // Assisted mode: lower confidence bar, more file types allowed,
-        // but still exclude sensitive docs, code/scripts, and Review Needed destinations.
+        // Assisted mode: lower confidence bar, more file types allowed.
+        // Sensitive docs allowed in local mode (go to SensitiveDocuments/) but not legacy mode.
         let path_str = rec.file_path.to_string_lossy();
+        let dest_is_sensitive_docs = planned_destination.contains("SensitiveDocuments");
         let assisted_plan_eligible = !auto_plan_eligible  // exclusive with auto
             && matches!(rec.safety_level, SafetyLevel::SafeCandidate)
             && impact_ok
             && rec.confidence.value() >= 60
-            && !matches!(
-                rec.purpose,
-                FilePurpose::SensitiveDocument | FilePurpose::Code | FilePurpose::Unknown
-            )
+            && !matches!(rec.purpose, FilePurpose::Code | FilePurpose::Unknown)
+            // Sensitive docs only allowed in assisted when in local mode (SensitiveDocuments/)
+            && (!matches!(rec.purpose, FilePurpose::SensitiveDocument) || dest_is_sensitive_docs)
             && !is_script_extension(&path_str)
             && !path_str.ends_with(".part")
-            // Destinations that go to Review Needed stay as review-only
-            && !planned_destination.contains("99_Review Needed")
+            && !dest_is_review_needed
             && !planned_destination.contains("(no destination computed)");
 
         manifest.entries.push(ManifestEntry {
