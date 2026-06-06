@@ -2837,7 +2837,7 @@ fn test_project_marker_detected_even_with_default_excludes() {
 }
 
 #[test]
-fn test_doctor_shows_version_070() {
+fn test_doctor_shows_current_version() {
     use assert_cmd::Command;
     use predicates::prelude::*;
     Command::cargo_bin("safesort")
@@ -2845,7 +2845,7 @@ fn test_doctor_shows_version_070() {
         .arg("doctor")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.10.0"));
+        .stdout(predicate::str::contains("0.11.0"));
 }
 
 #[test]

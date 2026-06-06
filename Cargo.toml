@@ -1,9 +1,9 @@
 [package]
 name = "safesort-ai"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 authors = ["SafeSort AI Team"]
-description = "Safety-first folder organizer — scans, classifies, and recommends without moving anything"
+description = "Local safety-first file organizer with backup and rollback"
 license = "MIT"
 repository = "https://github.com/safesort-ai/safesort"
 

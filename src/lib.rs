@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! SafeSort AI — Safety-First Folder Organizer
 //!
 //! This library provides the core scanning, classification, and safety engine

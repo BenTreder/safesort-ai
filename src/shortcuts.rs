@@ -477,6 +477,53 @@ pub fn cmd_shortcut_scan() -> Result<()> {
     Ok(())
 }
 
+fn print_local_output_preview(root: &Path) {
+    println!();
+    println!("  Local output preview:");
+
+    if !root.exists() {
+        println!("    Output folder does not exist yet: {}", root.display());
+        return;
+    }
+
+    let mut dirs: Vec<PathBuf> = match std::fs::read_dir(root) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect(),
+        Err(_) => {
+            println!("    Could not read output folder: {}", root.display());
+            return;
+        }
+    };
+
+    dirs.sort();
+
+    if dirs.is_empty() {
+        println!("    No top-level folders found yet.");
+        return;
+    }
+
+    for dir in dirs.iter().take(16) {
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| dir.display().to_string());
+
+        let item_count = std::fs::read_dir(dir)
+            .ok()
+            .map(|it| it.filter_map(|e| e.ok()).count())
+            .unwrap_or(0);
+
+        println!("    ./safesort/{:<34} {:>4} item(s)", name, item_count);
+    }
+
+    if dirs.len() > 16 {
+        println!("    ... and {} more top-level folders", dirs.len() - 16);
+    }
+}
+
 // ─── safesort -run ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -666,8 +713,12 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
             println!("  Files skipped:    {}", receipt.total_skipped);
             println!("  Local output:     {}", safesort_root.display());
             println!("  Rollback receipt: {}", rollback_path.display());
+            println!("  Undo later:        safesort -rollback");
             println!();
 
+            print_local_output_preview(&safesort_root);
+
+            println!();
             println!(
                 "  SafeSort moved {} file(s) into {}.",
                 receipt.total_moved,
@@ -714,20 +765,58 @@ pub fn cmd_shortcut_run_mode(mode: RunMode) -> Result<()> {
 
 pub fn cmd_shortcut_status() -> Result<()> {
     println!();
+    println!("  SafeSort AI - Status");
+    println!("  ─────────────────────────────────────────────────────────────");
+
+    match load_latest_pointer()? {
+        Some(pointer) => {
+            println!("  Latest scan target: {}", pointer.scan_target);
+            println!("  Latest manifest:    {}", pointer.manifest_path);
+            println!("  Scan created:       {}", pointer.created_at);
+        }
+        None => {
+            println!("  Latest scan target: none");
+            println!("  Latest manifest:    none");
+            println!("  Scan created:       none");
+        }
+    }
+
+    println!();
+
     match find_newest_rollback_receipt() {
         None => {
-            println!("  No rollback receipts found.");
-            println!(
-                "  (Receipts are stored under: {})",
-                rollbacks_dir().display()
-            );
+            println!("  Latest rollback receipt: none");
+            println!("  Last moved count:        0");
+            println!("  Last rollback status:    no organize run found");
+            println!();
+            println!("  Suggested next command:  safesort -scan");
         }
         Some(receipt_path) => {
             println!("  Latest rollback receipt: {}", receipt_path.display());
+
+            let raw = std::fs::read_to_string(&receipt_path).unwrap_or_default();
+            let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+
+            let moved = parsed
+                .get("total_moved")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let skipped = parsed
+                .get("total_skipped")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
+            println!("  Last moved count:        {}", moved);
+            println!("  Last skipped count:      {}", skipped);
+            println!("  Last rollback status:    receipt available");
             println!();
+            println!("  Suggested next command:  safesort -rollback");
+            println!();
+
             apply_status(&receipt_path)?;
         }
     }
+
     println!();
     Ok(())
 }
@@ -785,37 +874,28 @@ pub fn cmd_shortcut_rollback() -> Result<()> {
 
 pub fn show_shortcut_help() {
     println!();
-    println!("  SafeSort AI Quick Commands");
+    println!("  SafeSort AI");
     println!();
-    println!("  Simple:");
-    println!(
-        "    safesort -learn               Learn brands/clients from your home folder (read-only)"
-    );
-    println!("    safesort -scan                Preview local organization for current folder");
-    println!("    safesort -run                 Organize AUTO-SAFE + ASSISTED files → ./safesort/");
-    println!("    safesort -run --auto-safe-only  Organize only AUTO-SAFE files");
-    println!("    safesort -status              Show latest apply/rollback status");
-    println!("    safesort -rollback            Roll back latest apply");
+    println!("  Use inside any folder:");
+    println!("    safesort -scan       Preview organization into ./safesort/");
+    println!("    safesort -run        Organize with backup + rollback");
+    println!("    safesort -status     Show last run");
+    println!("    safesort -rollback   Undo last organize");
     println!();
-    println!("  Output structure (owner/category first):");
-    println!("    ./safesort/LadybugHoney/PDFs/NFC Inserts/");
+    println!("  Nothing moves during -scan.");
+    println!("  -run asks for ORGANIZE before moving anything.");
+    println!("  After -run, choose KEEP or ROLLBACK.");
+    println!();
+    println!("  Output examples:");
     println!("    ./safesort/QuickTapID/PDFs/Inserts/");
-    println!("    ./safesort/916Hookup/PDFs/Stickers/");
-    println!("    ./safesort/BenTreder/PDFs/Resumes/");
-    println!("    ./safesort/Audio/MP3s/");
-    println!("    ./safesort/Video/MP4s/");
-    println!("    ./safesort/Other/PNGs/");
+    println!("    ./safesort/LadybugHoney/PDFs/NFC Inserts/");
+    println!("    ./safesort/PDFs/");
+    println!("    ./safesort/MP3s/");
+    println!("    ./safesort/SensitiveInfo/PDFs/");
+    println!("    ./safesort/PartialDownloads/");
     println!();
-    println!("  Safety:");
-    println!("    -scan and -learn never move files");
-    println!("    -run requires preflight, backup, typed ORGANIZE, and KEEP/ROLLBACK prompt");
-    println!("    Output is always inside ./safesort/ — never outside current folder");
-    println!("    LOCKED / HIGH-impact / code files never move");
-    println!();
-    println!("  Advanced:");
-    println!("    safesort organize ...");
-    println!("    safesort preflight ...");
-    println!("    safesort apply ...");
-    println!("    safesort rollback ...");
+    println!("  Optional:");
+    println!("    safesort -learn      Learn brands/projects from your home folder, read-only");
+    println!("    safesort doctor      Show system status");
     println!();
 }

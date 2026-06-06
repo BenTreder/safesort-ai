@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "safesort",
     version,
     about = "SafeSort AI — Safety-First Folder Organizer",
-    long_about = "SafeSort AI organizes folders safely without breaking apps, scripts, projects, services, system files, or important paths.\n\nThis is a safety-first read-only scanner with smart placement recommendations. Nothing is moved."
+    long_about = "SafeSort AI organizes the current folder into ./safesort/ with backup, checksum verification, and rollback.\n\nUse: safesort -scan, safesort -run, safesort -status, safesort -rollback."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -143,7 +143,7 @@ pub enum Commands {
         manifest: String,
     },
 
-    /// Premium guided organization workflow (safe — nothing is moved)
+    /// Advanced organization workflow
     Organize {
         #[arg(long)]
         path: Option<String>,

@@ -256,3 +256,44 @@ fn test_apply_options_struct_accessible() {
         assisted_mode: false,
     };
 }
+
+#[test]
+fn test_release_scripts_exist() {
+    assert!(std::path::Path::new("scripts/install.sh").exists());
+    assert!(std::path::Path::new("scripts/uninstall.sh").exists());
+}
+
+#[test]
+fn test_makefile_targets_exist() {
+    let makefile = std::fs::read_to_string("Makefile").expect("Makefile should exist");
+    for target in [
+        "test:",
+        "build:",
+        "install:",
+        "uninstall:",
+        "release-check:",
+    ] {
+        assert!(
+            makefile.contains(target),
+            "Makefile should contain target {target}"
+        );
+    }
+}
+
+#[test]
+fn test_binary_quick_help_mentions_simple_commands() {
+    let mut cmd = assert_cmd::Command::cargo_bin("safesort").unwrap();
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("safesort -scan"))
+        .stdout(predicates::str::contains("safesort -run"))
+        .stdout(predicates::str::contains("safesort -status"))
+        .stdout(predicates::str::contains("safesort -rollback"))
+        .stdout(predicates::str::contains("./safesort/"));
+}
+
+#[test]
+fn test_status_command_does_not_panic() {
+    let mut cmd = assert_cmd::Command::cargo_bin("safesort").unwrap();
+    cmd.arg("-status").assert().success();
+}

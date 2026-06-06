@@ -255,7 +255,7 @@ fn doctor() -> Result<()> {
     println!("  SafeSort AI — System Status");
     println!();
     println!("  Version:             {}", env!("CARGO_PKG_VERSION"));
-    println!("  Build:               Guarded apply with freeze-state rollback");
+    println!("  Build:               Local organize with freeze-state backup and rollback");
     println!("  Default safety mode: dry-run (nothing moves without explicit flags)");
     println!();
     println!("  ─── Movement Engine ────────────────────────────────");
