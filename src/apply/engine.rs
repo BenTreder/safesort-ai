@@ -178,9 +178,20 @@ fn verify_source(
 /// Compute backup path for a source file under backup_dir.
 /// Uses the full source path to avoid collisions.
 fn backup_path_for(source: &Path, backup_dir: &Path) -> PathBuf {
-    // Strip leading '/' and use the full path hierarchy under backup_dir.
     let relative = source.strip_prefix("/").unwrap_or(source);
     backup_dir.join(relative)
+}
+
+/// Resolve the final destination file path.
+/// If `planned_dest` already ends with the source filename, return it unchanged.
+/// Otherwise append the source filename so destinations are always file paths, not dir paths.
+fn resolve_final_destination(planned_dest: &Path, source: &Path) -> PathBuf {
+    let source_name = source.file_name().unwrap_or_default();
+    if planned_dest.file_name() == Some(source_name) {
+        planned_dest.to_path_buf()
+    } else {
+        planned_dest.join(source_name)
+    }
 }
 
 /// Run a complete apply operation. Moves only eligible files, creates backups
@@ -219,7 +230,9 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
 
     for entry in &plan.entries {
         let source = PathBuf::from(&entry.source_path);
-        let destination = PathBuf::from(&entry.planned_destination);
+        let dest_dir = PathBuf::from(&entry.planned_destination);
+        // Resolve final file path: append source filename if not already present.
+        let final_dest = resolve_final_destination(&dest_dir, &source);
 
         // Per-entry safety gate.
         match entry_safety_gate(entry, opts.apply_safe_only) {
@@ -227,35 +240,21 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
                 println!("  SKIP  {}", source.display());
                 println!("        Reason: {reason}");
                 total_skipped += 1;
-                entries.push(RollbackEntry {
-                    original_source_path: entry.source_path.clone(),
-                    planned_destination: entry.planned_destination.clone(),
-                    backup_path: String::new(),
-                    checksum_before: entry
-                        .checksum_before
-                        .as_ref()
-                        .map(|c| c.sha256.clone())
-                        .unwrap_or_default(),
-                    checksum_after_backup: String::new(),
-                    checksum_after_destination: String::new(),
-                    file_size: entry.file_size,
-                    moved_at: applied_at.clone(),
-                    rollback_status: RollbackStatus::Skipped,
-                });
+                entries.push(skipped_entry(entry, &applied_at, &final_dest));
                 continue;
             }
             Ok(()) => {}
         }
 
         // Verify destination safety.
-        if !is_safe_destination(&destination) {
+        if !is_safe_destination(&final_dest) {
             println!(
                 "  SKIP  {} — destination is unsafe: {}",
                 source.display(),
-                destination.display()
+                final_dest.display()
             );
             total_skipped += 1;
-            entries.push(skipped_entry(entry, &applied_at));
+            entries.push(skipped_entry(entry, &applied_at, &final_dest));
             continue;
         }
 
@@ -265,36 +264,33 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
             Err(reason) => {
                 println!("  SKIP  {} — {reason}", source.display());
                 total_skipped += 1;
-                entries.push(skipped_entry(entry, &applied_at));
+                entries.push(skipped_entry(entry, &applied_at, &final_dest));
                 continue;
             }
         };
 
-        // Destination must not already exist.
-        if destination.exists() {
+        // Final destination file must not already exist.
+        if final_dest.exists() {
             println!(
                 "  SKIP  {} — destination already exists: {}",
                 source.display(),
-                destination.display()
+                final_dest.display()
             );
             total_skipped += 1;
-            entries.push(skipped_entry(entry, &applied_at));
+            entries.push(skipped_entry(entry, &applied_at, &final_dest));
             continue;
         }
 
         // Dry-run: record without moving.
         if opts.dry_run {
             let backup_path = backup_path_for(&source, opts.backup_dir);
-            println!(
-                "  DRY-RUN  {} → {}",
-                source.display(),
-                destination.display()
-            );
+            println!("  DRY-RUN  {} → {}", source.display(), final_dest.display());
             println!("           backup would be: {}", backup_path.display());
             total_skipped += 1;
             entries.push(RollbackEntry {
                 original_source_path: entry.source_path.clone(),
                 planned_destination: entry.planned_destination.clone(),
+                final_destination_path: final_dest.to_string_lossy().to_string(),
                 backup_path: backup_path.to_string_lossy().to_string(),
                 checksum_before: checksum_before.clone(),
                 checksum_after_backup: String::new(),
@@ -336,31 +332,31 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
             )));
         }
 
-        // Step 3: Create destination parent directory.
-        if let Some(parent) = destination.parent() {
+        // Step 3: Create final destination parent directory.
+        if let Some(parent) = final_dest.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 SafeSortError::InvalidPath(format!("Cannot create destination directory: {e}"))
             })?;
         }
 
-        // Step 4: Move source to destination.
-        println!("  MOVE    {} → {}", source.display(), destination.display());
-        fs::rename(&source, &destination).map_err(|e| {
+        // Step 4: Move source to final destination file path.
+        println!("  MOVE    {} → {}", source.display(), final_dest.display());
+        fs::rename(&source, &final_dest).map_err(|e| {
             SafeSortError::InvalidPath(format!(
                 "Cannot move {} to {}: {e}",
                 source.display(),
-                destination.display()
+                final_dest.display()
             ))
         })?;
 
         // Step 5: Verify destination checksum.
-        let dest_checksum = checksum_file(&destination)
+        let dest_checksum = checksum_file(&final_dest)
             .map_err(|e| SafeSortError::InvalidPath(format!("Cannot checksum destination: {e}")))?;
         if dest_checksum.sha256 != checksum_before {
             return Err(SafeSortError::InvalidPath(format!(
                 "Destination checksum mismatch for {} — file may be corrupt. \
                  Backup is at {}",
-                destination.display(),
+                final_dest.display(),
                 backup_path.display()
             )));
         }
@@ -370,6 +366,7 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
         entries.push(RollbackEntry {
             original_source_path: entry.source_path.clone(),
             planned_destination: entry.planned_destination.clone(),
+            final_destination_path: final_dest.to_string_lossy().to_string(),
             backup_path: backup_path.to_string_lossy().to_string(),
             checksum_before: checksum_before.clone(),
             checksum_after_backup: backup_checksum.sha256,
@@ -423,10 +420,12 @@ pub fn apply_manifest(opts: ApplyOptions<'_>) -> Result<ApplyReceipt> {
 fn skipped_entry(
     entry: &crate::manifest::rollback::ManifestEntry,
     applied_at: &str,
+    final_dest: &Path,
 ) -> RollbackEntry {
     RollbackEntry {
         original_source_path: entry.source_path.clone(),
         planned_destination: entry.planned_destination.clone(),
+        final_destination_path: final_dest.to_string_lossy().to_string(),
         backup_path: String::new(),
         checksum_before: entry
             .checksum_before
@@ -469,14 +468,19 @@ pub fn apply_status(receipt_path: &Path) -> Result<()> {
         };
 
         let src = PathBuf::from(&e.original_source_path);
-        let dest = PathBuf::from(&e.planned_destination);
+        let final_dest_str = if e.final_destination_path.is_empty() {
+            &e.planned_destination
+        } else {
+            &e.final_destination_path
+        };
+        let dest = PathBuf::from(final_dest_str);
         let src_exists = src.exists();
         let dest_exists = dest.exists();
         let backup_exists = !e.backup_path.is_empty() && PathBuf::from(&e.backup_path).exists();
 
         println!("  [{status}]");
         println!("    From:    {}", e.original_source_path);
-        println!("    To:      {}", e.planned_destination);
+        println!("    To:      {final_dest_str}");
         println!(
             "    Source exists: {}  Dest exists: {}  Backup exists: {}",
             src_exists, dest_exists, backup_exists
@@ -515,7 +519,13 @@ pub fn rollback_apply(receipt_path: &Path, confirm_overwrite: bool) -> Result<()
 
         let original = PathBuf::from(&entry.original_source_path);
         let backup = PathBuf::from(&entry.backup_path);
-        let dest = PathBuf::from(&entry.planned_destination);
+        // Use final_destination_path (resolved file path) if present; fall back for old receipts.
+        let dest_str = if entry.final_destination_path.is_empty() {
+            &entry.planned_destination
+        } else {
+            &entry.final_destination_path
+        };
+        let dest = PathBuf::from(dest_str);
 
         // Verify backup exists.
         if !backup.exists() {
@@ -581,9 +591,19 @@ pub fn rollback_apply(receipt_path: &Path, confirm_overwrite: bool) -> Result<()
             )));
         }
 
-        // Remove the file from destination (it was moved there; backup is the source of truth).
+        // Remove the exact destination file that was moved. Never remove a directory.
         if dest.exists() {
-            println!("  REMOVE  destination copy: {}", dest.display());
+            if dest.is_dir() {
+                println!(
+                    "  REFUSE  {} — destination path is a directory, not a file. \
+                     Cannot remove safely. Manual review required.",
+                    dest.display()
+                );
+                entry.rollback_status = RollbackStatus::CannotRollback;
+                refused += 1;
+                continue;
+            }
+            println!("  REMOVE  destination file: {}", dest.display());
             fs::remove_file(&dest).map_err(|e| {
                 SafeSortError::InvalidPath(format!(
                     "Cannot remove destination file {}: {e}",
@@ -606,6 +626,6 @@ pub fn rollback_apply(receipt_path: &Path, confirm_overwrite: bool) -> Result<()
 
     println!();
     println!("  Rollback complete. Restored: {restored}  Refused: {refused}");
-    println!("  Nothing was moved (rollback copies from backup).");
+    println!("  Rollback restored files from backup. No new organize moves were performed.");
     Ok(())
 }

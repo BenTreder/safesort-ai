@@ -6,8 +6,12 @@ use serde::{Deserialize, Serialize};
 pub struct RollbackEntry {
     /// Original source path (where the file lived before apply).
     pub original_source_path: String,
-    /// Planned destination (where the file was moved to).
+    /// Planned destination directory from the manifest.
     pub planned_destination: String,
+    /// Resolved final file path (planned_destination + source filename if needed).
+    /// Empty in receipts written before this field was added.
+    #[serde(default)]
+    pub final_destination_path: String,
     /// Path where a backup copy was stored before moving.
     pub backup_path: String,
     /// SHA-256 of the file before any operation.

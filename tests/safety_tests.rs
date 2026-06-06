@@ -4259,3 +4259,500 @@ fn test_rollback_restored_count_is_positive() {
         "Restored content must match original"
     );
 }
+
+// ── Phase 5 destination-resolution tests ──────────────────────────────────────
+
+#[test]
+fn test_apply_destination_dir_appends_filename() {
+    // planned_destination is a directory path (no extension, last component ≠ filename).
+    // Apply must move the file to dest_dir/filename, not rename the directory itself.
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "image bytes";
+    let (src, sha, size) = create_real_file(tmp.path(), "photo.jpg", content);
+
+    // planned_destination is a bare directory path — filename not yet appended.
+    let dest_dir = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Media")
+        .join("Photos");
+    let final_dest = dest_dir.join("photo.jpg");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(
+        final_dest.exists(),
+        "File should be at dest_dir/filename, not at dest_dir itself"
+    );
+    assert!(
+        !dest_dir.is_file(),
+        "dest_dir must be a directory, not a file"
+    );
+    assert_eq!(fs::read_to_string(&final_dest).unwrap(), content);
+    assert!(!src.exists(), "Source must be gone after move");
+}
+
+#[test]
+fn test_apply_planned_dest_with_filename_not_doubled() {
+    // planned_destination already ends with the source filename — must not double it.
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "no double";
+    let (src, sha, size) = create_real_file(tmp.path(), "doc.pdf", content);
+
+    // planned_destination already includes the filename.
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Docs")
+        .join("doc.pdf");
+    let doubled = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Docs")
+        .join("doc.pdf")
+        .join("doc.pdf");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(
+        dest.exists(),
+        "File must be at planned path (with filename)"
+    );
+    assert!(!doubled.exists(), "Filename must not be appended twice");
+    assert!(!src.exists());
+}
+
+#[test]
+fn test_apply_creates_destination_parent_dir() {
+    // Destination parent directory does not exist before apply — apply must create it.
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "parent dir creation";
+    let (src, sha, size) = create_real_file(tmp.path(), "report.txt", content);
+
+    // A nested path that doesn't exist yet.
+    let dest_dir = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("NewFolder")
+        .join("Nested");
+    let final_dest = dest_dir.join("report.txt");
+    assert!(!dest_dir.exists(), "dest_dir must not exist before apply");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(
+        dest_dir.is_dir(),
+        "Apply must create the destination parent directory"
+    );
+    assert!(
+        final_dest.exists(),
+        "File must be at final path inside created dir"
+    );
+    assert!(!src.exists());
+}
+
+#[test]
+fn test_apply_final_path_recorded_in_receipt() {
+    // Receipt must record final_destination_path (file path with filename).
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "receipt check";
+    let (src, sha, size) = create_real_file(tmp.path(), "logo.png", content);
+
+    let dest_dir = tmp.path().join("home").join("safesort_user").join("Logos");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    let receipt_json = fs::read_to_string(&rollback_out).unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&receipt_json).unwrap();
+    let entry = &receipt["entries"][0];
+    let final_path = entry["final_destination_path"].as_str().unwrap_or("");
+    assert!(
+        final_path.ends_with("logo.png"),
+        "final_destination_path in receipt must end with the source filename; got: {final_path}"
+    );
+}
+
+#[test]
+fn test_rollback_does_not_remove_parent_directory() {
+    // After rollback, the parent directory of the destination must still exist.
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "parent dir survives";
+    let (src, sha, size) = create_real_file(tmp.path(), "asset.png", content);
+
+    let dest_dir = tmp.path().join("home").join("safesort_user").join("Assets");
+    let final_dest = dest_dir.join("asset.png");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(final_dest.exists());
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("rollback")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(
+        !final_dest.exists(),
+        "Destination file must be removed by rollback"
+    );
+    assert!(
+        dest_dir.exists(),
+        "Parent directory must NOT be removed by rollback"
+    );
+    assert!(src.exists(), "Source must be restored");
+}
+
+#[test]
+fn test_rollback_refuses_if_final_dest_is_directory() {
+    // Safety: if the destination path turns out to be a directory, rollback must refuse to remove it.
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    let tmp = TempDir::new().unwrap();
+    let content = "dir safety";
+    let (src, sha, size) = create_real_file(tmp.path(), "file.txt", content);
+
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("file.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    // Simulate: remove destination file and replace it with a directory of the same name.
+    fs::remove_file(&dest).unwrap();
+    fs::create_dir_all(&dest).unwrap();
+    assert!(dest.is_dir(), "test setup: dest must be a directory now");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("rollback")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("REFUSE"));
+
+    assert!(dest.is_dir(), "Directory must NOT be removed by rollback");
+}
+
+#[test]
+fn test_dry_run_output_includes_filename() {
+    // Dry-run with a directory-style planned_destination must print the final path with filename.
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    let tmp = TempDir::new().unwrap();
+    let content = "dry run filename";
+    let (src, sha, size) = create_real_file(tmp.path(), "banner.png", content);
+
+    let dest_dir = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Banners");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("banner.png"));
+
+    // File must not have moved.
+    assert!(src.exists(), "Dry-run must not move source file");
+    assert!(
+        !dest_dir.join("banner.png").exists(),
+        "Dry-run must not create destination"
+    );
+}
+
+#[test]
+fn test_destination_collision_skips_entry_safely() {
+    // If the final destination file already exists, the entry must be skipped, not overwritten.
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    let tmp = TempDir::new().unwrap();
+    let content = "collision test";
+    let (src, sha, size) = create_real_file(tmp.path(), "image.png", content);
+
+    let dest_dir = tmp.path().join("home").join("safesort_user").join("Images");
+    let final_dest = dest_dir.join("image.png");
+
+    // Pre-create the destination file to trigger a collision.
+    fs::create_dir_all(&dest_dir).unwrap();
+    fs::write(&final_dest, "existing content that must not be overwritten").unwrap();
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SKIP"));
+
+    assert!(
+        src.exists(),
+        "Source must not be moved when destination exists"
+    );
+    assert_eq!(
+        fs::read_to_string(&final_dest).unwrap(),
+        "existing content that must not be overwritten",
+        "Existing destination file must not be overwritten"
+    );
+}
+
+#[test]
+fn test_rollback_message_says_no_organize_moves() {
+    // Rollback trailing message must say "No new organize moves were performed."
+    use assert_cmd::Command;
+    use predicates::prelude::*;
+    let tmp = TempDir::new().unwrap();
+    let content = "message test";
+    let (src, sha, size) = create_real_file(tmp.path(), "msg.txt", content);
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("msg.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("rollback")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No new organize moves were performed",
+        ));
+}
+
+#[test]
+fn test_no_real_user_folders_touched_in_dest_resolution() {
+    // All apply/rollback operations must stay within temp directories.
+    // No file outside tmp should be created or modified.
+    use assert_cmd::Command;
+    let tmp = TempDir::new().unwrap();
+    let content = "isolation check";
+    let (src, sha, size) = create_real_file(tmp.path(), "isolated.txt", content);
+    let dest_dir = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Isolated");
+    let final_dest = dest_dir.join("isolated.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest_dir, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    // Verify everything is inside tmp.
+    assert!(
+        final_dest.starts_with(tmp.path()),
+        "Destination must be inside tmp"
+    );
+    assert!(
+        backup_dir.starts_with(tmp.path()),
+        "Backup must be inside tmp"
+    );
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("rollback")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(src.exists(), "Source restored inside tmp");
+    assert!(!final_dest.exists(), "Destination cleared inside tmp");
+}
