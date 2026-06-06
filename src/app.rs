@@ -1389,28 +1389,32 @@ fn cmd_apply(
 ) -> Result<()> {
     println!();
 
-    // Gate 1: all required acknowledgement flags.
-    let mut missing: Vec<&str> = Vec::new();
-    if !confirm {
-        missing.push("--confirm");
-    }
-    if !i_understand {
-        missing.push("--i-understand-this-moves-files");
-    }
-    if !backup && !dry_run {
-        missing.push("--backup  (or --dry-run to preview)");
-    }
-    if !apply_safe_only && !dry_run {
-        missing.push("--apply-safe-only");
-    }
-    if !missing.is_empty() {
-        println!("  Apply requires all acknowledgement flags. Missing:");
-        for flag in &missing {
-            println!("    {flag}");
+    // Dry-run: load and preview without any confirmation flags required.
+    // Only real apply (moves files) requires all acknowledgement flags.
+    if !dry_run {
+        let mut missing: Vec<&str> = Vec::new();
+        if !confirm {
+            missing.push("--confirm");
         }
-        println!();
-        println!("  Nothing was moved.");
-        return Ok(());
+        if !i_understand {
+            missing.push("--i-understand-this-moves-files");
+        }
+        if !backup {
+            missing.push("--backup");
+        }
+        if !apply_safe_only {
+            missing.push("--apply-safe-only");
+        }
+        if !missing.is_empty() {
+            println!("  Real apply requires all acknowledgement flags. Missing:");
+            for flag in &missing {
+                println!("    {flag}");
+            }
+            println!();
+            println!("  Tip: use --dry-run to preview without confirmation flags.");
+            println!("  Nothing was moved.");
+            return Ok(());
+        }
     }
 
     // Gate 2: manifest path required.
@@ -1462,7 +1466,11 @@ fn cmd_apply(
     if dry_run {
         println!("  ─── DRY RUN — Nothing will be moved ────────────────────────────");
         println!("  Manifest: {manifest_path_str}");
-        println!("  Would use backup dir: {}", backup_dir_path.display());
+        if backup_dir.is_some() {
+            println!("  Would use backup dir: {}", backup_dir_path.display());
+        } else {
+            println!("  (Use --backup-dir <PATH> to specify a freeze-state backup location)");
+        }
         println!();
     } else {
         println!("  ─── SafeSort AI — Apply ─────────────────────────────────────────");

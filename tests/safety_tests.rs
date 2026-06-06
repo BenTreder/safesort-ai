@@ -3959,3 +3959,303 @@ fn test_no_files_outside_fixture_touched() {
         "Rollback output must be under tmp fixture"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Phase 5 Fix & Verification Tests (Tests 126–137)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_dry_run_does_not_require_confirmation_flags() {
+    // --dry-run alone (no --confirm, --backup, --apply-safe-only) should work
+    let tmp = tempfile::TempDir::new().unwrap();
+    let (src, sha, size) = create_real_file(tmp.path(), "dryrun_noflags.txt", "content");
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("out")
+        .join("dryrun_noflags.txt");
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("DRY RUN"));
+
+    // Source must not have moved
+    assert!(src.exists(), "Dry-run must not move the source file");
+    assert!(!dest.exists(), "Dry-run must not create destination");
+}
+
+#[test]
+fn test_dry_run_creates_no_backup() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let (src, sha, size) = create_real_file(tmp.path(), "dryrun_nobackup.txt", "data");
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("out")
+        .join("dryrun_nobackup.txt");
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup_check");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--dry-run")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .assert()
+        .success();
+
+    // No backup files should be created during dry-run
+    let backup_files: Vec<_> = walkdir::WalkDir::new(&tmp.path().join("backup_check"))
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+    assert!(
+        backup_files.is_empty(),
+        "Dry-run must not create backup files"
+    );
+    assert!(src.exists(), "Dry-run must not move source");
+}
+
+#[test]
+fn test_safe_zone_files_are_not_penalized_for_inside_project() {
+    // Files in Downloads/ (a safe zone) should not get the inside_project penalty,
+    // even if the Downloads folder is under a parent with Cargo.toml.
+    use safesort_ai::placement::confidence::Confidence;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::risk::SafetyLevel;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    // Create a Downloads subfolder under a directory that has a Cargo.toml
+    let downloads = tmp.path().join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    // Put a Cargo.toml in the parent (simulating being inside a project)
+    fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"test\"").unwrap();
+
+    let logo = downloads.join("bentreder_logo.png");
+    fs::write(&logo, "fake png").unwrap();
+
+    let engine =
+        SmartPlacementEngine::new(tmp.path().to_path_buf(), OrganizationMode::SafeAutopilot);
+
+    let rec = engine.analyze_file(&logo, SafetyLevel::SafeCandidate);
+    // With safe zone, inside_project penalty is skipped → confidence should be ≥95
+    assert!(
+        rec.confidence.value() >= 95,
+        "Downloads file should not be penalized for inside_project; got confidence {}",
+        rec.confidence.value()
+    );
+    assert!(
+        matches!(rec.safety_level, SafetyLevel::SafeCandidate),
+        "Downloads logo should be SafeCandidate"
+    );
+    let _ = Confidence::new(); // suppress unused import warning
+}
+
+#[test]
+fn test_demo_fixture_produces_auto_plan_eligible_entries() {
+    use safesort_ai::manifest::build_plan_manifest;
+    use safesort_ai::placement::engine::{OrganizationMode, SmartPlacementEngine};
+    use safesort_ai::scan::Scanner;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let downloads = tmp.path().join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+
+    // Loose image with known owner in Downloads — should be auto_plan_eligible
+    fs::write(downloads.join("bentreder_logo.png"), "fake png content").unwrap();
+    fs::write(downloads.join("quicktapid_banner.jpg"), "fake jpg content").unwrap();
+
+    let scanner = Scanner::new();
+    let results = scanner.scan(&downloads, &downloads, 2, &[]).unwrap();
+
+    let engine =
+        SmartPlacementEngine::new(tmp.path().to_path_buf(), OrganizationMode::SafeAutopilot);
+    let items: Vec<(PathBuf, safesort_ai::scan::risk::SafetyLevel)> = results
+        .items
+        .values()
+        .flatten()
+        .map(|item| {
+            (
+                PathBuf::from(&item.path),
+                safesort_ai::scan::risk::SafetyLevel::SafeCandidate,
+            )
+        })
+        .collect();
+    let placement = engine.run(&items);
+
+    assert!(
+        placement.summary.auto_plan_eligible > 0,
+        "Demo fixture in a standalone Downloads dir should produce at least one auto_plan_eligible entry; got 0"
+    );
+
+    // Build the manifest and verify it has entries
+    let manifest = build_plan_manifest(
+        &downloads,
+        OrganizationMode::SafeAutopilot,
+        &placement.recommendations,
+        None,
+        results.summary.total,
+    );
+    assert!(
+        !manifest.entries.is_empty(),
+        "Manifest should have at least one entry"
+    );
+    assert!(
+        manifest.entries.iter().any(|e| e.auto_plan_eligible),
+        "Manifest should contain at least one auto_plan_eligible=true entry"
+    );
+}
+
+#[test]
+fn test_real_apply_moved_count_is_positive() {
+    // Integration test: real apply moves a SAFE/NONE auto_plan_eligible file
+    // and reports moved > 0.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let content = "real apply integration test";
+    let (src, sha, size) = create_real_file(tmp.path(), "integration.txt", content);
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Workspace")
+        .join("integration.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Files moved:   1"));
+
+    assert!(dest.exists(), "File should be at destination after apply");
+    assert!(!src.exists(), "Source should be gone after apply");
+}
+
+#[test]
+fn test_apply_status_shows_positive_moved_count() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let (src, sha, size) = create_real_file(tmp.path(), "status_test.txt", "status content");
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Workspace")
+        .join("status_test.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    // apply-status should show Moved: 1
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply-status")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Moved:     1"));
+}
+
+#[test]
+fn test_rollback_restored_count_is_positive() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let content = "rollback integration";
+    let (src, sha, size) = create_real_file(tmp.path(), "rollback_int.txt", content);
+    let dest = tmp
+        .path()
+        .join("home")
+        .join("safesort_user")
+        .join("Workspace")
+        .join("rollback_int.txt");
+
+    let manifest_path = tmp.path().join("manifest.json");
+    let manifest = build_test_manifest(&src, &dest, "SAFE", "NONE", 95, true, Some(&sha), size);
+    fs::write(&manifest_path, manifest).unwrap();
+
+    let backup_dir = tmp.path().join("backup");
+    let rollback_out = tmp.path().join("rollback.json");
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("apply")
+        .arg(manifest_path.to_str().unwrap())
+        .arg("--confirm")
+        .arg("--i-understand-this-moves-files")
+        .arg("--backup")
+        .arg("--apply-safe-only")
+        .arg("--backup-dir")
+        .arg(backup_dir.to_str().unwrap())
+        .arg("--rollback-output")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(!src.exists());
+    assert!(dest.exists());
+
+    Command::cargo_bin("safesort")
+        .unwrap()
+        .arg("rollback")
+        .arg(rollback_out.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Restored: 1"));
+
+    assert!(src.exists(), "File must be restored to original path");
+    assert!(!dest.exists(), "Destination must be removed after rollback");
+    assert_eq!(
+        fs::read_to_string(&src).unwrap(),
+        content,
+        "Restored content must match original"
+    );
+}

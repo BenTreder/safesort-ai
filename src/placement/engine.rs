@@ -179,8 +179,15 @@ impl SmartPlacementEngine {
         // Check if in safe zone (Downloads/Desktop)
         let is_safe_zone = self.is_in_safe_zone(file_path);
 
-        // Check if inside an active project
-        let inside_project = self.is_inside_project(file_path);
+        // Check if inside an active project.
+        // Files already in a safe zone (Downloads/Desktop) are never penalized:
+        // they're loose files in a download area, not project assets, even if the
+        // Downloads folder happens to live under a directory that has a Cargo.toml.
+        let inside_project = if is_safe_zone {
+            false
+        } else {
+            self.is_inside_project(file_path)
+        };
 
         // Compute confidence
         let mut confidence = self.compute_confidence(

@@ -249,17 +249,25 @@ impl Classifier {
         }
     }
 
-    fn is_in_safe_loose_zone(path: &Path, _scan_root: &Path, home: &Path) -> bool {
-        let rel = match path.strip_prefix(home) {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-        if let Some(first) = rel.components().next() {
-            let name = first.as_os_str().to_string_lossy();
-            config::SAFE_LOOSE_ZONES.iter().any(|z| name == *z)
-        } else {
-            false
+    fn is_in_safe_loose_zone(path: &Path, scan_root: &Path, home: &Path) -> bool {
+        // Primary check: is the file under ~/Downloads or ~/Desktop?
+        if let Ok(rel) = path.strip_prefix(home) {
+            if let Some(first) = rel.components().next() {
+                let name = first.as_os_str().to_string_lossy();
+                if config::SAFE_LOOSE_ZONES.iter().any(|z| name == *z) {
+                    return true;
+                }
+            }
         }
+        // Fallback: scan root itself is a safe loose zone (e.g. ./safesort_demo/Downloads).
+        // This handles demo fixtures and explicit --path Downloads invocations.
+        if let Some(root_name) = scan_root.file_name() {
+            let name = root_name.to_string_lossy();
+            if config::SAFE_LOOSE_ZONES.iter().any(|z| name == *z) {
+                return path.starts_with(scan_root);
+            }
+        }
+        false
     }
 
     fn detect_media_document(item: &ScanItem) -> Vec<Evidence> {
