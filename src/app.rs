@@ -181,7 +181,42 @@ pub fn run(cli: Cli) -> Result<()> {
             manifest,
             confirm,
             i_understand,
-        } => cmd_apply(manifest.as_deref(), confirm, i_understand),
+            backup,
+            apply_safe_only,
+            dry_run,
+            backup_dir,
+            rollback_output,
+        } => cmd_apply(
+            manifest.as_deref(),
+            confirm,
+            i_understand,
+            backup,
+            apply_safe_only,
+            dry_run,
+            backup_dir.as_deref(),
+            rollback_output.as_deref(),
+        ),
+        Commands::ApplyStatus { receipt } => {
+            let p = std::path::PathBuf::from(&receipt);
+            if !p.exists() {
+                return Err(SafeSortError::InvalidPath(format!(
+                    "Receipt file does not exist: {receipt}"
+                )));
+            }
+            crate::apply::apply_status(&p)
+        }
+        Commands::Rollback {
+            receipt,
+            confirm_overwrite,
+        } => {
+            let p = std::path::PathBuf::from(&receipt);
+            if !p.exists() {
+                return Err(SafeSortError::InvalidPath(format!(
+                    "Receipt file does not exist: {receipt}"
+                )));
+            }
+            crate::apply::rollback_apply(&p, confirm_overwrite)
+        }
     }
 }
 
@@ -1341,51 +1376,141 @@ fn cmd_preflight(manifest_path: &std::path::PathBuf) -> Result<()> {
 
 // ─── Apply ─────────────────────────────────────────────────────────
 
-fn cmd_apply(manifest: Option<&str>, confirm: bool, i_understand: bool) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn cmd_apply(
+    manifest: Option<&str>,
+    confirm: bool,
+    i_understand: bool,
+    backup: bool,
+    apply_safe_only: bool,
+    dry_run: bool,
+    backup_dir: Option<&str>,
+    rollback_output: Option<&str>,
+) -> Result<()> {
     println!();
 
-    // Require both flags.
-    if !confirm || !i_understand {
-        println!("  ╔═══════════════════════════════════════════════════════════════╗");
-        println!("  ║  Apply requires both flags to proceed:                       ║");
-        println!("  ║    --confirm                                                 ║");
-        println!("  ║    --i-understand-this-moves-files                           ║");
-        println!("  ║                                                              ║");
-        println!("  ║  Nothing was moved.                                          ║");
-        println!("  ╚═══════════════════════════════════════════════════════════════╝");
+    // Gate 1: all required acknowledgement flags.
+    let mut missing: Vec<&str> = Vec::new();
+    if !confirm {
+        missing.push("--confirm");
+    }
+    if !i_understand {
+        missing.push("--i-understand-this-moves-files");
+    }
+    if !backup && !dry_run {
+        missing.push("--backup  (or --dry-run to preview)");
+    }
+    if !apply_safe_only && !dry_run {
+        missing.push("--apply-safe-only");
+    }
+    if !missing.is_empty() {
+        println!("  Apply requires all acknowledgement flags. Missing:");
+        for flag in &missing {
+            println!("    {flag}");
+        }
         println!();
+        println!("  Nothing was moved.");
         return Ok(());
     }
 
-    // Both flags present — run preflight, then refuse to move.
-    if let Some(manifest_path) = manifest {
-        let p = std::path::PathBuf::from(manifest_path);
-        if p.exists() {
-            println!("  Running apply preflight on: {manifest_path}");
+    // Gate 2: manifest path required.
+    let manifest_path_str = match manifest {
+        Some(p) => p,
+        None => {
+            println!("  Apply requires a manifest path: safesort apply <MANIFEST> [flags]");
+            println!("  Nothing was moved.");
+            return Ok(());
+        }
+    };
+
+    let manifest_path = std::path::PathBuf::from(manifest_path_str);
+    if !manifest_path.exists() {
+        println!("  Manifest file does not exist: {manifest_path_str}");
+        println!("  Nothing was moved.");
+        return Ok(());
+    }
+
+    // Resolve backup directory.
+    let default_backup = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local/share/safesort/backups")
+        .join(format!(
+            "run-{}",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ));
+
+    let backup_dir_path = match backup_dir {
+        Some(d) => PathBuf::from(d),
+        None => default_backup,
+    };
+
+    // Resolve rollback output.
+    let default_rollback_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local/share/safesort/rollbacks");
+    let default_rollback_out = default_rollback_dir.join(format!(
+        "rollback-{}.json",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+
+    let rollback_out_path: Option<PathBuf> = match rollback_output {
+        Some(p) => Some(PathBuf::from(p)),
+        None if !dry_run => Some(default_rollback_out),
+        None => None,
+    };
+
+    if dry_run {
+        println!("  ─── DRY RUN — Nothing will be moved ────────────────────────────");
+        println!("  Manifest: {manifest_path_str}");
+        println!("  Would use backup dir: {}", backup_dir_path.display());
+        println!();
+    } else {
+        println!("  ─── SafeSort AI — Apply ─────────────────────────────────────────");
+        println!("  Manifest:  {manifest_path_str}");
+        println!("  Backup:    {}", backup_dir_path.display());
+        if let Some(ref ro) = rollback_out_path {
+            println!("  Rollback:  {}", ro.display());
+        }
+        println!();
+    }
+
+    let opts = crate::apply::ApplyOptions {
+        manifest_path: &manifest_path,
+        backup_dir: &backup_dir_path,
+        rollback_output: rollback_out_path.as_deref(),
+        dry_run,
+        apply_safe_only,
+    };
+
+    match crate::apply::apply_manifest(opts) {
+        Ok(receipt) => {
             println!();
-            match preflight::run_preflight(&p) {
-                Ok(report) => {
-                    print!("{}", report.render());
-                    if report.all_passed {
-                        println!("  Apply preflight PASSED — all safety gates would pass.");
-                    } else {
-                        println!("  Apply preflight FAILED — cannot proceed.");
-                    }
-                }
-                Err(e) => {
-                    println!("  Preflight error: {e}");
+            println!("  ─── Apply Summary ────────────────────────────────────────────");
+            if dry_run {
+                println!("  DRY RUN complete — nothing was moved.");
+                println!(
+                    "  Would move: {} file(s)",
+                    receipt.total_moved + receipt.total_skipped
+                );
+            } else {
+                println!("  Files moved:   {}", receipt.total_moved);
+                println!("  Files skipped: {}", receipt.total_skipped);
+                if let Some(ref ro) = rollback_out_path {
+                    println!("  Rollback receipt: {}", ro.display());
+                    println!("  To undo: safesort rollback {}", ro.display());
                 }
             }
             println!();
+            if receipt.total_moved == 0 {
+                println!("  Nothing was moved.");
+            }
+        }
+        Err(e) => {
+            println!("  Apply error: {e}");
+            println!("  Nothing was moved.");
         }
     }
 
-    println!("  ╔═══════════════════════════════════════════════════════════════╗");
-    println!("  ║  Apply preflight passed, but real file movement is still     ║");
-    println!("  ║  disabled in this MVP build.                                 ║");
-    println!("  ║                                                              ║");
-    println!("  ║  Nothing was moved.                                          ║");
-    println!("  ╚═══════════════════════════════════════════════════════════════╝");
     println!();
     Ok(())
 }

@@ -162,12 +162,13 @@ pub enum Commands {
         no_default_excludes: bool,
     },
 
-    /// Apply a plan (DISABLED in this safety-first build)
+    /// Apply a plan manifest — moves only SAFE/NONE-LOW-impact auto-eligible files
     ///
-    /// Even with all flags present, apply will not move files in this MVP build.
-    /// Use `safesort preflight <MANIFEST>` to validate a manifest safely.
+    /// Requires --confirm, --i-understand-this-moves-files, --backup, and --apply-safe-only.
+    /// Creates a freeze-state backup before each move. Writes a rollback receipt.
+    /// Use --dry-run to preview without moving anything.
     Apply {
-        /// Path to the manifest JSON file (required)
+        /// Path to the SafeSort plan manifest JSON file
         manifest: Option<String>,
 
         /// First required acknowledgement flag
@@ -177,6 +178,42 @@ pub enum Commands {
         /// Second required acknowledgement flag
         #[arg(long = "i-understand-this-moves-files")]
         i_understand: bool,
+
+        /// Required: create a freeze-state backup before moving each file
+        #[arg(long)]
+        backup: bool,
+
+        /// Only move entries with auto_plan_eligible=true (≥95% confidence, NONE/LOW impact, SAFE)
+        #[arg(long = "apply-safe-only")]
+        apply_safe_only: bool,
+
+        /// Preview what would be moved without actually moving anything
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+
+        /// Override the backup/freeze directory (default: ~/.local/share/safesort/backups/<run_id>/)
+        #[arg(long = "backup-dir")]
+        backup_dir: Option<String>,
+
+        /// Write the rollback receipt to this file
+        #[arg(long = "rollback-output")]
+        rollback_output: Option<String>,
+    },
+
+    /// Show the status of a previous apply run (moves nothing)
+    ApplyStatus {
+        /// Path to the rollback receipt JSON
+        receipt: String,
+    },
+
+    /// Restore files moved by a previous apply run using the rollback receipt
+    Rollback {
+        /// Path to the rollback receipt JSON written by apply
+        receipt: String,
+
+        /// Allow overwriting existing files at the original source paths
+        #[arg(long = "confirm-overwrite-rollback")]
+        confirm_overwrite: bool,
     },
 }
 

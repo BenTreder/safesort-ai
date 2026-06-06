@@ -3,6 +3,7 @@
 //! This library provides the core scanning, classification, and safety engine
 //! for the SafeSort AI CLI application.
 
+pub mod apply;
 pub mod config;
 pub mod detectors;
 pub mod error;
