@@ -14,6 +14,7 @@ mod reports;
 mod rules_file;
 mod safety;
 mod scan;
+mod shortcuts;
 
 use cli::Cli;
 use error::Result;
@@ -25,6 +26,26 @@ fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
+
+    // Intercept shortcut flags before clap sees them.
+    // clap does not accept single-dash long flags, so we handle them here.
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = &raw_args[1..];
+
+    if args.is_empty() {
+        shortcuts::show_shortcut_help();
+        return Ok(());
+    }
+
+    if args.len() == 1 {
+        match args[0].as_str() {
+            "-scan" => return shortcuts::cmd_shortcut_scan(),
+            "-run" => return shortcuts::cmd_shortcut_run(),
+            "-status" => return shortcuts::cmd_shortcut_status(),
+            "-rollback" => return shortcuts::cmd_shortcut_rollback(),
+            _ => {}
+        }
+    }
 
     let cli = Cli::parse();
     app::run(cli)

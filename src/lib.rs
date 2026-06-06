@@ -16,3 +16,4 @@ pub mod reports;
 pub mod rules_file;
 pub mod safety;
 pub mod scan;
+pub mod shortcuts;
